@@ -115,7 +115,8 @@ type Feedback = { ok: boolean } | null;
 const ri = (min: number, max: number): number =>
   Math.floor(Math.random() * (max - min + 1)) + min;
 const pick = <T,>(arr: readonly T[]): T => arr[ri(0, arr.length - 1)];
-const fmt = (n: number): string => n.toLocaleString("ro-RO");
+const fmt = (n: number): string =>
+  n.toLocaleString("ro-RO").replace(/\./g, " ");
 
 const toRoman = (n: number): string => {
   const pairs: [number, string][] = [
