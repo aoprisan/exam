@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type CSSProperties } from "react";
 
 /* ------------------------------------------------------------------ */
 /* Tipuri                                                              */
@@ -89,6 +89,8 @@ interface TopicStat {
 interface DayStat {
   ok: number;
   total: number;
+  /** `true` după ce misiunea zilei a fost îndeplinită și răsplata acordată. */
+  quest?: boolean;
 }
 
 interface Progress {
@@ -97,6 +99,10 @@ interface Progress {
   examHistory: ExamEntry[];
   /** Istoric pe zile pentru statistici și calendar (cheia: `YYYY-MM-DD`). */
   daily: Record<string, DayStat>;
+  /** Insignele câștigate (cheia: id-ul insignei, valoarea: data `YYYY-MM-DD`). */
+  badges: Record<string, string>;
+  /** Sunet și vibrație la răspuns (preferință de pe dispozitiv). */
+  sound: boolean;
   level: Level;
 }
 
@@ -999,7 +1005,7 @@ const makeVarianta = (): ExamSubject[] => {
 /* Stocare                                                             */
 /* ------------------------------------------------------------------ */
 
-const emptyProgress = (): Progress => ({ perTopic: {}, stars: 0, examHistory: [], daily: {}, level: 2 });
+const emptyProgress = (): Progress => ({ perTopic: {}, stars: 0, examHistory: [], daily: {}, badges: {}, sound: true, level: 2 });
 
 const loadProgress = async (): Promise<Progress> => {
   try {
@@ -1009,6 +1015,8 @@ const loadProgress = async (): Promise<Progress> => {
         const p = JSON.parse(res.value) as Progress;
         if (p.level == null) p.level = 2;
         if (!p.daily) p.daily = {}; // istoric vechi, fără contor pe zile
+        if (!p.badges) p.badges = {}; // istoric vechi, fără insigne
+        if (p.sound == null) p.sound = true; // implicit pornit
         return p;
       }
     }
@@ -1071,6 +1079,7 @@ h1, h2, .display { font-family: "Baloo 2", system-ui, sans-serif; }
 .hand { font-family: "Patrick Hand", cursive; }
 
 .card {
+  position: relative;
   background: var(--card);
   border: 2px solid var(--ink);
   border-radius: 14px;
@@ -1161,6 +1170,119 @@ button { font-family: inherit; }
 
 .bar { height: 8px; border-radius: 6px; background: #E8E3D6; overflow: hidden; }
 .bar > div { height: 100%; background: var(--green-pen); border-radius: 6px; }
+
+/* ---- Harta drumului spre Lazăr ---- */
+.journey { position: relative; }
+.jstop { position: relative; display: flex; gap: 12px; align-items: stretch; }
+/* Drumul: linie întreruptă verticală prin coloana cu medalioane. */
+.jrail { position: relative; flex: none; width: 52px; display: flex; justify-content: center; }
+.jrail::before {
+  content: ""; position: absolute; left: 50%; top: 0; bottom: 0;
+  width: 0; border-left: 3px dashed var(--ink); opacity: .28; transform: translateX(-50%);
+}
+.jstop.start .jrail::before { top: 50%; }
+.jstop.finish .jrail::before { bottom: 50%; }
+.jnode {
+  position: relative; z-index: 1; width: 46px; height: 46px; margin: 7px 0;
+  border-radius: 50%; border: 3px solid var(--ink); background: #fff;
+  display: grid; place-items: center; font-size: 21px; line-height: 1;
+  box-shadow: 2px 2px 0 rgba(33,56,92,.2);
+}
+.jnode.nou { border-style: dashed; opacity: .7; }
+/* În lucru: inel verde proporțional cu progresul (--p = 0..100). */
+.jnode.lucru { background: conic-gradient(var(--green-pen) calc(var(--p,0) * 1%), #E6E1D4 0); padding: 4px; border-color: var(--ink); }
+.jnode.lucru .jicon { width: 100%; height: 100%; border-radius: 50%; background: #fff; display: grid; place-items: center; }
+.jnode.stapanit { background: var(--highlight); }
+.jnode .jbadge {
+  position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px;
+  border-radius: 50%; background: var(--green-pen); color: #fff;
+  border: 2px solid #fff; display: grid; place-items: center; font-size: 11px; font-weight: 800;
+}
+.jcard {
+  flex: 1; min-width: 0; text-align: left; align-self: center;
+  display: flex; align-items: center; gap: 10px;
+  background: var(--card); border: 2px solid var(--ink); border-radius: 14px;
+  padding: 10px 14px; margin: 5px 0; cursor: pointer;
+  box-shadow: 3px 3px 0 rgba(33,56,92,.15); transition: transform .08s ease;
+}
+.jcard:active { transform: translate(2px,2px); box-shadow: 1px 1px 0 rgba(33,56,92,.15); }
+.jcard.done { background: #F4FBF4; }
+.jstop.start .jlabel, .jstop.finish .jlabel { align-self: center; padding: 8px 4px; }
+.jstatus { font-size: 13px; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .jcard { transition: none; } }
+
+/* ---- Rang (acasă) ---- */
+.rank-bar { height: 7px; border-radius: 6px; background: #E8E3D6; overflow: hidden; margin-top: 6px; }
+.rank-bar > div { height: 100%; background: var(--highlight); border-radius: 6px; }
+
+/* ---- Insigne ---- */
+.badge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 10px; }
+.badge {
+  border: 2px solid var(--ink); border-radius: 14px; background: var(--card);
+  padding: 10px 8px; text-align: center; box-shadow: 2px 2px 0 rgba(33,56,92,.15);
+}
+.badge.locked { opacity: .45; filter: grayscale(1); border-style: dashed; box-shadow: none; }
+.badge .b-ic { font-size: 28px; line-height: 1; }
+.badge .b-nm { font-family: "Baloo 2", system-ui, sans-serif; font-weight: 700; font-size: 12.5px; margin-top: 4px; }
+.badge .b-ds { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+
+/* ---- Confetti ---- */
+.confetti { position: absolute; inset: 0; overflow: visible; pointer-events: none; z-index: 4; }
+.confetti i {
+  position: absolute; top: 6px; display: block; border-radius: 2px; opacity: 0;
+  animation: confetti-fall .95s ease-out forwards;
+}
+@keyframes confetti-fall {
+  0% { transform: translate(0, -10px) rotate(0deg); opacity: 1; }
+  100% { transform: translate(var(--dx, 0), 150px) rotate(560deg); opacity: 0; }
+}
+
+/* ---- Bannerul de sărbătoare (rang / insignă) ---- */
+.celebrate {
+  position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 50; max-width: 92vw;
+  display: flex; align-items: center; gap: 12px;
+  background: var(--card); border: 2px solid var(--ink); border-radius: 16px;
+  padding: 12px 18px; box-shadow: 4px 4px 0 rgba(33,56,92,.22);
+  animation: celebrate-in .3s ease;
+}
+.celebrate .c-ic { font-size: 34px; line-height: 1; }
+.celebrate .c-tt { font-family: "Baloo 2", system-ui, sans-serif; font-weight: 800; font-size: 15px; color: var(--red-pen); }
+.celebrate .c-sb { font-family: "Patrick Hand", cursive; font-size: 18px; color: var(--ink); }
+@keyframes celebrate-in { from { transform: translate(-50%, -16px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .confetti { display: none; }
+  .celebrate { animation: none; }
+}
+
+/* ---- Bufnița Lazăr (mascotă) ---- */
+.mascot { display: flex; align-items: center; gap: 10px; }
+.mascot-face {
+  position: relative; flex: none; width: 52px; height: 52px;
+  border-radius: 50%; border: 2px solid var(--ink); background: #FFF6DA;
+  display: grid; place-items: center; font-size: 28px;
+  box-shadow: 2px 2px 0 rgba(33,56,92,.2);
+}
+.mascot.sm .mascot-face { width: 44px; height: 44px; font-size: 24px; }
+.mascot-face.cheer, .mascot-face.celebrate { animation: mascot-bob .5s ease; }
+.mascot-react { position: absolute; top: -7px; right: -7px; font-size: 16px; }
+.mascot-bubble {
+  position: relative; flex: 1; min-width: 0;
+  background: var(--card); border: 2px solid var(--ink); border-radius: 14px;
+  padding: 8px 12px; font-family: "Patrick Hand", cursive; font-size: 17px;
+  color: var(--ink); box-shadow: 2px 2px 0 rgba(33,56,92,.12);
+}
+.mascot-bubble::before {
+  content: ""; position: absolute; left: -9px; top: 50%; transform: translateY(-50%);
+  border: 5px solid transparent; border-right-color: var(--ink);
+}
+.mascot-bubble::after {
+  content: ""; position: absolute; left: -6px; top: 50%; transform: translateY(-50%);
+  border: 4px solid transparent; border-right-color: var(--card);
+}
+@keyframes mascot-bob { 0% { transform: translateY(0); } 50% { transform: translateY(-6px); } 100% { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .mascot-face.cheer, .mascot-face.celebrate { animation: none; } }
 
 .timer-strip {
   position: sticky; top: 0; z-index: 5;
@@ -1268,6 +1390,57 @@ const Verdict = ({ ok, correct }: { ok: boolean; correct: string }) => (
 const Stars = ({ n }: { n: number }) => (
   <span className="display" style={{ fontWeight: 800, fontSize: 18 }}>⭐ {n}</span>
 );
+
+const CONFETTI_COLORS = ["var(--highlight)", "var(--green-pen)", "var(--red-pen)", "#5A8DE0", "#E879C8"];
+
+/** Mic vârtej de confetti; se animă o dată la montare (dezactivat la reduced-motion). */
+const Confetti = ({ n = 22 }: { n?: number }) => {
+  const pieces = useMemo(
+    () =>
+      Array.from({ length: n }, () => ({
+        left: ri(8, 92),
+        dx: ri(-70, 70),
+        delay: ri(0, 160),
+        color: pick(CONFETTI_COLORS),
+        w: ri(6, 9),
+        h: ri(9, 14),
+      })),
+    [n],
+  );
+  return (
+    <div className="confetti" aria-hidden="true">
+      {pieces.map((p, i) => (
+        <i
+          key={i}
+          style={{
+            left: `${p.left}%`,
+            background: p.color,
+            width: p.w,
+            height: p.h,
+            animationDelay: `${p.delay}ms`,
+            ["--dx" as string]: `${p.dx}px`,
+          } as CSSProperties}
+        />
+      ))}
+    </div>
+  );
+};
+
+type Mood = "idle" | "cheer" | "encourage" | "celebrate";
+
+/** Bufnița Lazăr — însoțitorul care reacționează cu o bulă de text. */
+const Mascot = ({ message, mood = "idle", small }: { message: string; mood?: Mood; small?: boolean }) => {
+  const reaction = mood === "cheer" ? "✨" : mood === "encourage" ? "💪" : mood === "celebrate" ? "🎉" : "";
+  return (
+    <div className={`mascot${small ? " sm" : ""}`}>
+      <div className={`mascot-face ${mood}`}>
+        <span aria-hidden="true">🦉</span>
+        {reaction && <span className="mascot-react" aria-hidden="true">{reaction}</span>}
+      </div>
+      <div className="mascot-bubble">{message}</div>
+    </div>
+  );
+};
 
 const mmss = (s: number): string =>
   `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -1769,6 +1942,8 @@ const QuestionCard = ({ topic, question, onAnswer, feedback, hideExpl }: Questio
         </div>
       )}
 
+      {feedback?.ok && <Confetti />}
+
       {feedback && (
         <>
           <Verdict ok={feedback.ok} correct={question.a} />
@@ -1799,6 +1974,123 @@ const QUICK_QUESTIONS = 9;
 const QUICK_SECONDS = 20 * 60;
 const VARIANTA_SECONDS = 60 * 60;
 
+/** Câte răspunsuri corecte „deblochează" un capitol pe harta drumului spre Lazăr. */
+const MASTERY_OK = 10;
+
+/** Misiunea zilei: câte exerciții de rezolvat azi și câte stele bonus la final. */
+const DAILY_GOAL = 10;
+const QUEST_REWARD = 5;
+
+type StopState = "nou" | "lucru" | "stapanit";
+
+/** Starea unui capitol pe hartă, derivată din statistica lui (corecte / total). */
+const masteryOf = (st?: TopicStat): { state: StopState; pct: number } => {
+  if (!st || st.total === 0) return { state: "nou", pct: 0 };
+  const pct = Math.min(100, Math.round((st.ok / MASTERY_OK) * 100));
+  return { state: st.ok >= MASTERY_OK ? "stapanit" : "lucru", pct };
+};
+
+/* ------------------------------------------------------------------ */
+/* Ranguri și insigne                                                  */
+/* ------------------------------------------------------------------ */
+
+interface Rank { min: number; name: string; icon: string }
+
+/** Rangurile, după numărul de stele adunate (prag crescător). */
+const RANKS: Rank[] = [
+  { min: 0, name: "Ucenic", icon: "🐣" },
+  { min: 50, name: "Explorator", icon: "🧭" },
+  { min: 150, name: "Detectiv al cifrelor", icon: "🔍" },
+  { min: 350, name: "Maestru", icon: "🎓" },
+  { min: 700, name: "Campion Lazăr", icon: "🏆" },
+];
+
+/** Rangul curent, următorul și progresul (0..100) până la el. */
+const rankOf = (stars: number): { rank: Rank; next: Rank | null; pct: number; index: number } => {
+  let index = 0;
+  for (let i = 0; i < RANKS.length; i++) if (stars >= RANKS[i].min) index = i;
+  const rank = RANKS[index];
+  const next = RANKS[index + 1] ?? null;
+  const pct = next ? Math.round(((stars - rank.min) / (next.min - rank.min)) * 100) : 100;
+  return { rank, next, pct, index };
+};
+
+/** Șir de zile consecutive cu activitate, terminând azi (sau ieri). */
+const streakFromDaily = (daily: Record<string, DayStat>): number => {
+  let streak = 0;
+  for (let i = 0; i < 400; i++) {
+    const k = dayKey(new Date(Date.now() - i * 86400000));
+    if (daily[k]) streak += 1;
+    else if (i > 0) break; // azi poate fi încă gol fără a rupe șirul
+  }
+  return streak;
+};
+
+interface BadgeDef { id: string; icon: string; name: string; desc: string; earned: (p: Progress) => boolean }
+
+/** Toate insignele, evaluate doar din progresul salvat — odată câștigate, rămân. */
+const BADGES: BadgeDef[] = [
+  { id: "stele10", icon: "🌟", name: "Prima colecție", desc: "10 stele adunate", earned: (p) => p.stars >= 10 },
+  { id: "stele100", icon: "💫", name: "O sută de stele", desc: "100 de stele adunate", earned: (p) => p.stars >= 100 },
+  { id: "stele500", icon: "🌠", name: "Galaxie de stele", desc: "500 de stele adunate", earned: (p) => p.stars >= 500 },
+  { id: "quest1", icon: "🎯", name: "Misiune îndeplinită", desc: "ai terminat o misiune a zilei", earned: (p) => Object.values(p.daily).some((d) => d.quest) },
+  { id: "streak5", icon: "🔥", name: "Cinci zile la rând", desc: "5 zile de antrenament consecutive", earned: (p) => streakFromDaily(p.daily) >= 5 },
+  { id: "days7", icon: "📅", name: "O săptămână de muncă", desc: "7 zile de antrenament în total", earned: (p) => Object.keys(p.daily).length >= 7 },
+  { id: "exam1", icon: "📜", name: "Primul examen", desc: "ai dat prima variantă tip examen", earned: (p) => p.examHistory.some((e) => e.tip === "varianta") },
+  { id: "nota9", icon: "💯", name: "Notă mare", desc: "notă de cel puțin 9 la un test", earned: (p) => p.examHistory.some((e) => e.nota >= 9) },
+  { id: "harta", icon: "🗺️", name: "Drumul cucerit", desc: "toate capitolele stăpânite", earned: (p) => TOPICS.every((t) => masteryOf(p.perTopic[t.id]).state === "stapanit") },
+];
+
+/** Acordă (mutând `p`) insignele nou câștigate; întoarce id-urile adăugate. */
+const awardBadges = (p: Progress): string[] => {
+  const k = todayKey();
+  const fresh: string[] = [];
+  for (const b of BADGES) {
+    if (!p.badges[b.id] && b.earned(p)) { p.badges[b.id] = k; fresh.push(b.id); }
+  }
+  return fresh;
+};
+
+/* ------------------------------------------------------------------ */
+/* Sunet (Web Audio, fără fișiere) și vibrație                         */
+/* ------------------------------------------------------------------ */
+
+let _audioCtx: AudioContext | null = null;
+const audioCtx = (): AudioContext | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AC) return null;
+    if (!_audioCtx) _audioCtx = new AC();
+    if (_audioCtx.state === "suspended") void _audioCtx.resume();
+    return _audioCtx;
+  } catch { return null; }
+};
+
+/** Un singur ton scurt cu atac/decay simplu. */
+const tone = (ctx: AudioContext, freq: number, start: number, dur: number, type: OscillatorType = "sine", peak = 0.12): void => {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  const t0 = ctx.currentTime + start;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(peak, t0 + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g);
+  g.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.03);
+};
+
+const playCorrect = (): void => { const c = audioCtx(); if (c) { tone(c, 660, 0, 0.12); tone(c, 990, 0.09, 0.16); } };
+const playWrong = (): void => { const c = audioCtx(); if (c) tone(c, 196, 0, 0.22, "triangle", 0.09); };
+const playFanfare = (): void => { const c = audioCtx(); if (c) [523, 659, 784, 1047].forEach((f, i) => tone(c, f, i * 0.1, 0.24, "triangle", 0.1)); };
+
+const vibrate = (pattern: number | number[]): void => {
+  try { if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(pattern); } catch { /* fără vibrație */ }
+};
+
 export default function MatePentruLazar() {
   const [screen, setScreen] = useState<Screen>("home");
   const [progress, setProgress] = useState<Progress>(emptyProgress());
@@ -1811,6 +2103,11 @@ export default function MatePentruLazar() {
   const [selDay, setSelDay] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  // sărbători (rang nou / insigne) — coadă afișată câte una
+  const [celebs, setCelebs] = useState<{ icon: string; title: string; sub: string }[]>([]);
+  const prevBadgesRef = useRef<Set<string> | null>(null);
+  const prevRankRef = useRef<number | null>(null);
 
   // antrenament
   const [topic, setTopic] = useState<Topic | null>(null);
@@ -1843,6 +2140,42 @@ export default function MatePentruLazar() {
   useEffect(() => { varAnswersRef.current = varAnswers; }, [varAnswers]);
   useEffect(() => { quickOkRef.current = quickOk; }, [quickOk]);
 
+  // Detectează insigne noi și avansări de rang ca să le sărbătorim.
+  useEffect(() => {
+    if (!loaded) return;
+    const curBadges = new Set(Object.keys(progress.badges));
+    const curRank = rankOf(progress.stars).index;
+    if (prevBadgesRef.current === null) {
+      // prima sincronizare după încărcare — fără sărbătoare retroactivă
+      prevBadgesRef.current = curBadges;
+      prevRankRef.current = curRank;
+      return;
+    }
+    const fresh: { icon: string; title: string; sub: string }[] = [];
+    for (const id of curBadges) {
+      if (!prevBadgesRef.current.has(id)) {
+        const b = BADGES.find((x) => x.id === id);
+        if (b) fresh.push({ icon: b.icon, title: "Insignă nouă!", sub: b.name });
+      }
+    }
+    if (prevRankRef.current !== null && curRank > prevRankRef.current) {
+      fresh.push({ icon: RANKS[curRank].icon, title: "Rang nou!", sub: RANKS[curRank].name });
+    }
+    prevBadgesRef.current = curBadges;
+    prevRankRef.current = curRank;
+    if (fresh.length) {
+      setCelebs((q) => [...q, ...fresh]);
+      if (progress.sound) playFanfare();
+    }
+  }, [progress, loaded]);
+
+  // Afișează sărbătorile pe rând, câte ~3,4s.
+  useEffect(() => {
+    if (celebs.length === 0) return;
+    const t = setTimeout(() => setCelebs((q) => q.slice(1)), 3400);
+    return () => clearTimeout(t);
+  }, [celebs]);
+
   const updateProgress = useCallback((fn: (p: Progress) => Progress) => {
     setProgress((prev) => {
       const next = fn(structuredClone(prev));
@@ -1853,6 +2186,14 @@ export default function MatePentruLazar() {
 
   const level: Level = progress.level ?? 2;
   const setLevel = (v: Level) => updateProgress((p) => { p.level = v; return p; });
+  const toggleSound = () => updateProgress((p) => { p.sound = !p.sound; if (p.sound) playCorrect(); return p; });
+
+  /** Sunet + vibrație la un răspuns, dacă preferința e pornită. */
+  const feedbackFx = (ok: boolean) => {
+    if (!progress.sound) return;
+    if (ok) { playCorrect(); vibrate(25); }
+    else { playWrong(); vibrate(60); }
+  };
 
   const recordAnswer = (topicId: string, ok: boolean) => {
     updateProgress((p) => {
@@ -1864,7 +2205,10 @@ export default function MatePentruLazar() {
       const d = p.daily[k] || { ok: 0, total: 0 };
       d.total += 1;
       if (ok) d.ok += 1;
+      // Misiunea zilei: stele bonus o singură dată, când se atinge ținta.
+      if (!d.quest && d.total >= DAILY_GOAL) { d.quest = true; p.stars += QUEST_REWARD; }
       p.daily[k] = d;
+      awardBadges(p);
       return p;
     });
   };
@@ -1884,6 +2228,7 @@ export default function MatePentruLazar() {
     if (!topic || !question) return;
     const ok = checkAnswer(input, question.a);
     setFeedback({ ok });
+    feedbackFx(ok);
     setStreak((s) => (ok ? s + 1 : 0));
     setSession((s) => ({ ok: s.ok + (ok ? 1 : 0), total: s.total + 1 }));
     recordAnswer(topic.id, ok);
@@ -1915,6 +2260,7 @@ export default function MatePentruLazar() {
     updateProgress((p) => {
       p.examHistory.push({ date: new Date().toISOString().slice(0, 10), nota, tip: "rapid" });
       if (p.examHistory.length > 40) p.examHistory = p.examHistory.slice(-40);
+      awardBadges(p);
       return p;
     });
     setScreen("quickResult");
@@ -1939,6 +2285,7 @@ export default function MatePentruLazar() {
     const current = quickQs[quickIdx];
     const ok = checkAnswer(input, current.q.a);
     setFeedback({ ok });
+    feedbackFx(ok);
     recordAnswer(current.topic.id, ok);
     if (ok) setQuickOk((n) => n + 1);
   };
@@ -1983,6 +2330,7 @@ export default function MatePentruLazar() {
       updateProgress((p) => {
         p.examHistory.push({ date: new Date().toISOString().slice(0, 10), nota: res.nota, tip: "varianta" });
         if (p.examHistory.length > 40) p.examHistory = p.examHistory.slice(-40);
+        awardBadges(p);
         return p;
       });
       setScreen("variantaResult");
@@ -2027,15 +2375,7 @@ export default function MatePentruLazar() {
   const examDates = new Set(progress.examHistory.map((e) => e.date));
 
   // șir de zile consecutive cu activitate, terminând azi (sau ieri)
-  const dayStreak = (() => {
-    let streak = 0;
-    for (let i = 0; i < 400; i++) {
-      const k = dayKey(new Date(Date.now() - i * 86400000));
-      if (progress.daily[k]) streak += 1;
-      else if (i > 0) break; // azi poate fi încă gol fără a rupe șirul
-    }
-    return streak;
-  })();
+  const dayStreak = streakFromDaily(progress.daily);
 
   const barDays: DayDatum[] = lastDayKeys(14).map((k) => ({
     key: k, ok: progress.daily[k]?.ok ?? 0, total: progress.daily[k]?.total ?? 0,
@@ -2095,6 +2435,17 @@ export default function MatePentruLazar() {
   return (
     <div className="caiet">
       <style>{CSS}</style>
+
+      {celebs.length > 0 && (
+        <div className="celebrate" role="status">
+          <Confetti n={16} />
+          <span className="c-ic">{celebs[0].icon}</span>
+          <span>
+            <span className="c-tt" style={{ display: "block" }}>{celebs[0].title}</span>
+            <span className="c-sb">{celebs[0].sub}</span>
+          </span>
+        </div>
+      )}
       <div className="wrap">
         {/* ----------------------------- ACASĂ ----------------------------- */}
         {screen === "home" && (
@@ -2102,12 +2453,81 @@ export default function MatePentruLazar() {
             <header style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <h1 style={{ fontSize: 30, margin: 0, fontWeight: 800 }}>Spre clasa a V‑a</h1>
-                <Stars n={progress.stars} />
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <button
+                    className="pill"
+                    style={{ padding: "5px 11px", fontSize: 16 }}
+                    onClick={toggleSound}
+                    aria-pressed={progress.sound}
+                    aria-label={progress.sound ? "Oprește sunetul" : "Pornește sunetul"}
+                    title={progress.sound ? "Sunet pornit" : "Sunet oprit"}
+                  >
+                    {progress.sound ? "🔊" : "🔇"}
+                  </button>
+                  <Stars n={progress.stars} />
+                </div>
               </div>
               <p className="hand" style={{ fontSize: 21, color: "var(--ink-soft)", margin: "4px 0 0", transform: "rotate(-1deg)" }}>
                 caietul meu de pregătire pentru Lazăr ✏️
               </p>
+              {(() => {
+                const { rank, next, pct } = rankOf(progress.stars);
+                return (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                      <span className="display" style={{ fontWeight: 700, fontSize: 14.5 }}>
+                        {rank.icon} {rank.name}
+                      </span>
+                      <span style={{ fontSize: 12, color: "var(--ink-soft)" }}>
+                        {next ? `${next.min - progress.stars} ⭐ până la ${next.name}` : "rang maxim 🏆"}
+                      </span>
+                    </div>
+                    <div className="rank-bar"><div style={{ width: `${pct}%` }} /></div>
+                  </div>
+                );
+              })()}
             </header>
+
+            <div style={{ marginBottom: 14 }}>
+              {(() => {
+                const questDone = (progress.daily[todayKey()]?.total ?? 0) >= DAILY_GOAL;
+                const greet =
+                  totals.total === 0 ? "Bună! Eu sunt Bufnița Lazăr. Hai să exersăm împreună! 🦉"
+                    : questDone ? "Misiunea de azi e gata — ești grozav! ✨"
+                      : dayStreak >= 3 ? `Ești pe val: ${dayStreak} zile la rând! 🔥`
+                        : "Mă bucur că te-ai întors! Hai la treabă. ✏️";
+                return <Mascot message={greet} mood={questDone ? "celebrate" : "idle"} />;
+              })()}
+            </div>
+
+            {(() => {
+              const today = progress.daily[todayKey()] ?? { ok: 0, total: 0 };
+              const done = Math.min(DAILY_GOAL, today.total);
+              const complete = today.total >= DAILY_GOAL;
+              const pct = Math.round((done / DAILY_GOAL) * 100);
+              return (
+                <div className="card" style={{ padding: 14, marginBottom: 14, background: complete ? "#F4FBF4" : "#FFFDF6" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                    <span className="display" style={{ fontWeight: 800, fontSize: 15 }}>🎯 Misiunea zilei</span>
+                    <span className="hand" style={{ fontSize: 17, color: complete ? "var(--green-pen)" : "var(--ink-soft)" }}>
+                      {done}/{DAILY_GOAL}
+                    </span>
+                  </div>
+                  {complete ? (
+                    <p className="hand" style={{ fontSize: 19, color: "var(--green-pen)", margin: 0, transform: "rotate(-1deg)" }}>
+                      Misiune îndeplinită! 🎉 +{QUEST_REWARD} ⭐
+                    </p>
+                  ) : (
+                    <>
+                      <span className="bar"><div style={{ width: `${pct}%` }} /></span>
+                      <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: "8px 0 0" }}>
+                        Rezolvă {DAILY_GOAL} exerciții azi și primești {QUEST_REWARD} stele bonus ⭐
+                      </p>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="card" style={{ padding: 14, marginBottom: 14, background: "#FFFDF6" }}>
               <div className="display" style={{ fontWeight: 800, fontSize: 15, marginBottom: 8 }}>Nivel de dificultate</div>
@@ -2156,35 +2576,78 @@ export default function MatePentruLazar() {
               📊 Statisticile mele — pe zile, grafice și calendar
             </button>
 
-            <h2 style={{ fontSize: 20, margin: "0 0 10px", fontWeight: 800 }}>Capitole de antrenament</h2>
-            <div style={{ display: "grid", gap: 10 }}>
-              {TOPICS.map((t) => {
-                const st = progress.perTopic[t.id];
-                const pct = st && st.total > 0 ? Math.round((st.ok / st.total) * 100) : null;
-                return (
-                  <button key={t.id} className="topic-card" onClick={() => startPractice(t)}>
-                    <span style={{ fontSize: 26 }}>{t.icon}</span>
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span className="display" style={{ display: "block", fontWeight: 700, fontSize: 16.5 }}>
-                        {t.name}
-                      </span>
-                      <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>{t.sub}</span>
-                      {st && st.total > 0 && (
-                        <span style={{ display: "block", marginTop: 6 }}>
-                          <span className="bar"><div style={{ width: `${pct}%` }} /></span>
-                        </span>
-                      )}
-                    </span>
+            {(() => {
+              const mastered = TOPICS.filter((t) => masteryOf(progress.perTopic[t.id]).state === "stapanit").length;
+              const allDone = mastered === TOPICS.length;
+              return (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "0 0 4px" }}>
+                    <h2 style={{ fontSize: 20, margin: 0, fontWeight: 800 }}>Drumul spre Lazăr 🗺️</h2>
                     <span className="hand" style={{ fontSize: 17, color: "var(--green-pen)", whiteSpace: "nowrap" }}>
-                      {st && st.total > 0 ? `${st.ok}/${st.total}` : "nou"}
+                      {mastered}/{TOPICS.length} capitole
                     </span>
-                  </button>
-                );
-              })}
-            </div>
-            {!loaded && (
-              <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 14 }}>Se încarcă progresul…</p>
-            )}
+                  </div>
+                  <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "0 0 12px" }}>
+                    Fiecare capitol se deblochează cu {MASTERY_OK} răspunsuri corecte. Adună-le pe toate și ajungi la poarta colegiului!
+                  </p>
+
+                  <div className="journey">
+                    <div className="jstop start">
+                      <div className="jrail"><div className="jnode" style={{ background: "var(--highlight)" }}>✏️</div></div>
+                      <div className="jlabel">
+                        <span className="display" style={{ fontWeight: 800, fontSize: 16 }}>Start</span>
+                        <div style={{ fontSize: 13, color: "var(--ink-soft)" }}>de aici pornește drumul</div>
+                      </div>
+                    </div>
+
+                    {TOPICS.map((t) => {
+                      const st = progress.perTopic[t.id];
+                      const { state, pct } = masteryOf(st);
+                      const statusText =
+                        state === "stapanit" ? "stăpânit! ⭐"
+                          : state === "lucru" ? `${st!.ok}/${MASTERY_OK} corecte`
+                            : "nou — hai să începem";
+                      return (
+                        <div key={t.id} className={`jstop ${state}`}>
+                          <div className="jrail">
+                            <div
+                              className={`jnode ${state}`}
+                              style={state === "lucru" ? ({ "--p": pct } as CSSProperties) : undefined}
+                            >
+                              {state === "lucru" ? <span className="jicon">{t.icon}</span> : t.icon}
+                              {state === "stapanit" && <span className="jbadge">✓</span>}
+                            </div>
+                          </div>
+                          <button className={`jcard${state === "stapanit" ? " done" : ""}`} onClick={() => startPractice(t)}>
+                            <span style={{ flex: 1, minWidth: 0 }}>
+                              <span className="display" style={{ display: "block", fontWeight: 700, fontSize: 16 }}>{t.name}</span>
+                              <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>{t.sub}</span>
+                            </span>
+                            <span className="hand jstatus" style={{ color: state === "stapanit" ? "var(--green-pen)" : "var(--ink-soft)" }}>
+                              {statusText}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    })}
+
+                    <div className="jstop finish">
+                      <div className="jrail"><div className="jnode" style={{ background: allDone ? "var(--highlight)" : "#fff" }}>🏛️</div></div>
+                      <div className="jlabel">
+                        <span className="display" style={{ fontWeight: 800, fontSize: 16 }}>Colegiul Lazăr</span>
+                        <div style={{ fontSize: 13, color: allDone ? "var(--green-pen)" : "var(--ink-soft)" }}>
+                          {allDone ? "Ai cucerit tot drumul! 🎉" : `Mai ai ${TOPICS.length - mastered} capitole până la poartă`}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {!loaded && (
+                    <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 14 }}>Se încarcă progresul…</p>
+                  )}
+                </>
+              );
+            })()}
           </>
         )}
 
@@ -2203,6 +2666,18 @@ export default function MatePentruLazar() {
                   {session.ok}/{session.total} corecte
                 </span>
               </div>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              {(() => {
+                const mood: Mood = !feedback ? "idle" : feedback.ok ? (streak >= 3 ? "celebrate" : "cheer") : "encourage";
+                const msg = !feedback
+                  ? pick(["Hai, arată ce poți! ✏️", "Gândește cu calm — sunt cu tine.", "Cred în tine!"])
+                  : feedback.ok
+                    ? (streak >= 3 ? `${streak} la rând — de neoprit! 🎉` : pick(["Super!", "Bravo!", "Exact așa!", "Ce bine!"]))
+                    : pick(["Aproape! Mai încercăm.", "Greșelile ne învață — mergem mai departe!", "Nu-i nimic, hai din nou."]);
+                return <Mascot small message={msg} mood={mood} />;
+              })()}
             </div>
 
             <QuestionCard topic={topic} question={question} onAnswer={answerPractice} feedback={feedback} />
@@ -2448,6 +2923,28 @@ export default function MatePentruLazar() {
             <div className="stat-grid" style={{ marginBottom: 22 }}>
               <StatTile big={String(activeDays)} lbl="zile de antrenament" />
               <StatTile big={String(dayStreak)} lbl="zile la rând 🔥" />
+            </div>
+
+            {/* insigne */}
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+                <span className="display" style={{ fontWeight: 800, fontSize: 15 }}>🏅 Insignele mele</span>
+                <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>
+                  {Object.keys(progress.badges).length}/{BADGES.length}
+                </span>
+              </div>
+              <div className="badge-grid">
+                {BADGES.map((b) => {
+                  const got = !!progress.badges[b.id];
+                  return (
+                    <div key={b.id} className={`badge${got ? "" : " locked"}`} title={b.desc}>
+                      <div className="b-ic">{got ? b.icon : "🔒"}</div>
+                      <div className="b-nm">{b.name}</div>
+                      <div className="b-ds">{b.desc}</div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
 
             {/* grafic — exerciții pe zi */}

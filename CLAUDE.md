@@ -72,8 +72,24 @@ the existing diacritics and tone (`var(--ink)`, handwritten "caiet" styling).
 
 5. **Storage** — `emptyProgress`, `loadProgress`, `saveProgress` against
    `window.storage` under key `mate-progres-v1`. Progress shape:
-   `{ perTopic: { [id]: {ok,total} }, stars, examHistory: [...], level }`.
-   `examHistory` is capped at the last 40 entries.
+   `{ perTopic: { [id]: {ok,total} }, stars, examHistory: [...],
+   daily: { [YYYY-MM-DD]: {ok,total,quest?} }, badges: { [id]: YYYY-MM-DD },
+   sound, level }`. `examHistory` is capped at the last 40 entries;
+   `loadProgress` back-fills missing `daily`/`badges`/`sound` for older saves.
+
+   **Gamification** (all derived from this Progress, no extra persistence
+   beyond `daily.quest` + `badges`): the home screen is a *journey map*
+   (`masteryOf` → a chapter is "stăpânit" at `MASTERY_OK` correct answers),
+   a *daily quest* (`DAILY_GOAL` exercises/day → `QUEST_REWARD` bonus stars,
+   awarded once via the `daily[*].quest` flag), *star ranks* (`RANKS`/`rankOf`)
+   and *badges* (`BADGES`/`awardBadges`, called inside every `updateProgress`
+   that changes stats). New ranks/badges fire a celebration toast detected by
+   a `useEffect` diffing `progress`; correct answers burst `<Confetti/>`. A
+   mascot (`<Mascot/>`, "Bufnița Lazăr") gives a contextual greeting on home
+   and reacts to each answer in practice (mood: idle/cheer/encourage/celebrate).
+   *Sound + haptics* are synthesized with the Web Audio API (no asset files):
+   `playCorrect`/`playWrong`/`playFanfare` + `vibrate`, gated by the persisted
+   `sound` flag (toggle in the home header) and triggered via `feedbackFx`.
 
 6. **CSS** — one template-literal string injected via `<style>`; CSS variables
    in `:root`. No external stylesheet.
