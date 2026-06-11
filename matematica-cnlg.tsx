@@ -140,6 +140,14 @@ const normalize = (s: unknown): string =>
 const checkAnswer = (user: unknown, correct: unknown): boolean =>
   normalize(user) === normalize(correct);
 
+/* Tastatura mobilă: implicit numerică. Întoarce „numeric" când răspunsul
+   așteptat e format doar din cifre (cu eventuale spații/puncte/virgule/minus
+   ca separatori) și „text" doar când răspunsul conține litere sau „/”
+   (numere romane, fracții). Astfel se afișează tastatura cu cifre ori de câte
+   ori răspunsul e un număr, indiferent de capitol. */
+const answerInputMode = (a: unknown): "numeric" | "text" =>
+  /^[\d.,\s−-]+$/.test(String(a ?? "")) ? "numeric" : "text";
+
 /* Date — cheile zilelor folosesc data UTC (`YYYY-MM-DD`), la fel ca
    `examHistory`, ca să se potrivească cu istoricul deja salvat. */
 const dayKey = (d: Date): string => d.toISOString().slice(0, 10);
@@ -2246,7 +2254,7 @@ const QuestionCard = ({ topic, question, onAnswer, feedback, hideExpl }: Questio
             ref={inputRef}
             className="answer-input"
             value={input}
-            inputMode={topic.id === "romane" || topic.id === "fractii" ? "text" : "numeric"}
+            inputMode={answerInputMode(question.a)}
             placeholder="răspunsul tău"
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
@@ -3122,7 +3130,7 @@ export default function MatePentruLazar() {
                         <input
                           className="answer-input small"
                           value={varAnswers[part.key] ?? ""}
-                          inputMode="numeric"
+                          inputMode={answerInputMode(part.a)}
                           placeholder="…"
                           onChange={(e) => setVarAnswers((a) => ({ ...a, [part.key]: e.target.value }))}
                           aria-label={`Răspuns subiectul ${s.nr} ${part.label || part.inputLabel || ""}`}
