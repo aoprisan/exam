@@ -1253,6 +1253,34 @@ button { font-family: inherit; }
   .celebrate { animation: none; }
 }
 
+/* ---- Bufnița Lazăr (mascotă) ---- */
+.mascot { display: flex; align-items: center; gap: 10px; }
+.mascot-face {
+  position: relative; flex: none; width: 52px; height: 52px;
+  border-radius: 50%; border: 2px solid var(--ink); background: #FFF6DA;
+  display: grid; place-items: center; font-size: 28px;
+  box-shadow: 2px 2px 0 rgba(33,56,92,.2);
+}
+.mascot.sm .mascot-face { width: 44px; height: 44px; font-size: 24px; }
+.mascot-face.cheer, .mascot-face.celebrate { animation: mascot-bob .5s ease; }
+.mascot-react { position: absolute; top: -7px; right: -7px; font-size: 16px; }
+.mascot-bubble {
+  position: relative; flex: 1; min-width: 0;
+  background: var(--card); border: 2px solid var(--ink); border-radius: 14px;
+  padding: 8px 12px; font-family: "Patrick Hand", cursive; font-size: 17px;
+  color: var(--ink); box-shadow: 2px 2px 0 rgba(33,56,92,.12);
+}
+.mascot-bubble::before {
+  content: ""; position: absolute; left: -9px; top: 50%; transform: translateY(-50%);
+  border: 5px solid transparent; border-right-color: var(--ink);
+}
+.mascot-bubble::after {
+  content: ""; position: absolute; left: -6px; top: 50%; transform: translateY(-50%);
+  border: 4px solid transparent; border-right-color: var(--card);
+}
+@keyframes mascot-bob { 0% { transform: translateY(0); } 50% { transform: translateY(-6px); } 100% { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .mascot-face.cheer, .mascot-face.celebrate { animation: none; } }
+
 .timer-strip {
   position: sticky; top: 0; z-index: 5;
   background: var(--paper);
@@ -1391,6 +1419,22 @@ const Confetti = ({ n = 22 }: { n?: number }) => {
           } as CSSProperties}
         />
       ))}
+    </div>
+  );
+};
+
+type Mood = "idle" | "cheer" | "encourage" | "celebrate";
+
+/** Bufnița Lazăr — însoțitorul care reacționează cu o bulă de text. */
+const Mascot = ({ message, mood = "idle", small }: { message: string; mood?: Mood; small?: boolean }) => {
+  const reaction = mood === "cheer" ? "✨" : mood === "encourage" ? "💪" : mood === "celebrate" ? "🎉" : "";
+  return (
+    <div className={`mascot${small ? " sm" : ""}`}>
+      <div className={`mascot-face ${mood}`}>
+        <span aria-hidden="true">🦉</span>
+        {reaction && <span className="mascot-react" aria-hidden="true">{reaction}</span>}
+      </div>
+      <div className="mascot-bubble">{message}</div>
     </div>
   );
 };
@@ -2376,6 +2420,18 @@ export default function MatePentruLazar() {
               })()}
             </header>
 
+            <div style={{ marginBottom: 14 }}>
+              {(() => {
+                const questDone = (progress.daily[todayKey()]?.total ?? 0) >= DAILY_GOAL;
+                const greet =
+                  totals.total === 0 ? "Bună! Eu sunt Bufnița Lazăr. Hai să exersăm împreună! 🦉"
+                    : questDone ? "Misiunea de azi e gata — ești grozav! ✨"
+                      : dayStreak >= 3 ? `Ești pe val: ${dayStreak} zile la rând! 🔥`
+                        : "Mă bucur că te-ai întors! Hai la treabă. ✏️";
+                return <Mascot message={greet} mood={questDone ? "celebrate" : "idle"} />;
+              })()}
+            </div>
+
             {(() => {
               const today = progress.daily[todayKey()] ?? { ok: 0, total: 0 };
               const done = Math.min(DAILY_GOAL, today.total);
@@ -2542,6 +2598,18 @@ export default function MatePentruLazar() {
                   {session.ok}/{session.total} corecte
                 </span>
               </div>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              {(() => {
+                const mood: Mood = !feedback ? "idle" : feedback.ok ? (streak >= 3 ? "celebrate" : "cheer") : "encourage";
+                const msg = !feedback
+                  ? pick(["Hai, arată ce poți! ✏️", "Gândește cu calm — sunt cu tine.", "Cred în tine!"])
+                  : feedback.ok
+                    ? (streak >= 3 ? `${streak} la rând — de neoprit! 🎉` : pick(["Super!", "Bravo!", "Exact așa!", "Ce bine!"]))
+                    : pick(["Aproape! Mai încercăm.", "Greșelile ne învață — mergem mai departe!", "Nu-i nimic, hai din nou."]);
+                return <Mascot small message={msg} mood={mood} />;
+              })()}
             </div>
 
             <QuestionCard topic={topic} question={question} onAnswer={answerPractice} feedback={feedback} />

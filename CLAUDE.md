@@ -84,7 +84,9 @@ the existing diacritics and tone (`var(--ink)`, handwritten "caiet" styling).
    awarded once via the `daily[*].quest` flag), *star ranks* (`RANKS`/`rankOf`)
    and *badges* (`BADGES`/`awardBadges`, called inside every `updateProgress`
    that changes stats). New ranks/badges fire a celebration toast detected by
-   a `useEffect` diffing `progress`; correct answers burst `<Confetti/>`.
+   a `useEffect` diffing `progress`; correct answers burst `<Confetti/>`. A
+   mascot (`<Mascot/>`, "Bufnița Lazăr") gives a contextual greeting on home
+   and reacts to each answer in practice (mood: idle/cheer/encourage/celebrate).
 
 6. **CSS** — one template-literal string injected via `<style>`; CSS variables
    in `:root`. No external stylesheet.
