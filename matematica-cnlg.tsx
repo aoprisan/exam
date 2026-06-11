@@ -1431,6 +1431,78 @@ function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: numbe
 }
 
 /* ------------------------------------------------------------------ */
+/* Prompt pentru analiza statisticilor cu Claude                        */
+/* ------------------------------------------------------------------ */
+
+interface PromptStats {
+  total: number;
+  ok: number;
+  accuracy: number;
+  stars: number;
+  bestNota: number | null;
+  activeDays: number;
+  streak: number;
+  examCount: number;
+  perTopic: { name: string; ok: number; total: number }[];
+  exams: ExamEntry[];
+  days: DayDatum[];
+}
+
+const nota1 = (n: number): string => n.toFixed(n % 1 === 0 ? 0 : 1);
+
+/** Construiește un prompt în limba română cu statisticile elevului,
+ *  ca să poată fi analizat de Claude (pe telefon sau pe claude.ai). */
+const buildClaudePrompt = (s: PromptStats): string => {
+  const lines: string[] = [
+    "Ești un profesor de matematică prietenos și răbdător. Analizează statisticile de mai jos ale unui elev de clasa a IV-a care se pregătește pentru testul de admitere/departajare la Colegiul Național „Gheorghe Lazăr” din Sibiu.",
+    "",
+    "Spune-mi, pe înțelesul unui părinte și al copilului:",
+    "1. La ce capitole stă bine și ce face deja corect.",
+    "2. Unde are cele mai mari dificultăți și ce greșeli ar putea repeta.",
+    "3. Un plan concret de antrenament pentru următoarele 2 săptămâni.",
+    "4. O încurajare scurtă pentru copil. Răspunde în limba română.",
+    "",
+    "=== REZUMAT ===",
+    `Exerciții rezolvate: ${s.total} (${s.ok} corecte, ${s.accuracy}% acuratețe)`,
+    `Stele adunate: ${s.stars}`,
+    `Cea mai bună notă: ${s.bestNota != null ? nota1(s.bestNota) : "—"}`,
+    `Zile de antrenament: ${s.activeDays} (${s.streak} zile la rând)`,
+    `Teste date: ${s.examCount}`,
+  ];
+
+  const topics = s.perTopic.filter((t) => t.total > 0);
+  if (topics.length) {
+    lines.push("", "=== PE CAPITOLE (corecte / total · acuratețe) ===");
+    for (const t of topics) {
+      const pct = Math.round((t.ok / t.total) * 100);
+      lines.push(`- ${t.name}: ${t.ok}/${t.total} · ${pct}%`);
+    }
+  }
+
+  if (s.exams.length) {
+    lines.push("", "=== ULTIMELE TESTE ===");
+    for (const e of s.exams.slice(-10)) {
+      lines.push(`- ${e.date}: ${nota1(e.nota)} (${e.tip === "varianta" ? "variantă tip examen" : "simulare rapidă"})`);
+    }
+  }
+
+  const days = s.days.filter((d) => d.total > 0);
+  if (days.length) {
+    lines.push("", "=== EXERCIȚII PE ZILE (recent) ===");
+    for (const d of days) lines.push(`- ${d.key}: ${d.ok}/${d.total}`);
+  }
+
+  return lines.join("\n");
+};
+
+/** Deschide Claude cu promptul precompletat — pe telefon se deschide
+ *  aplicația Claude (link universal), altfel claude.ai în browser. */
+const openInClaude = (prompt: string): void => {
+  const url = `https://claude.ai/new?q=${encodeURIComponent(prompt)}`;
+  window.open(url, "_blank", "noopener,noreferrer");
+};
+
+/* ------------------------------------------------------------------ */
 /* Cardul de exercițiu (antrenament și simulare rapidă)                 */
 /* ------------------------------------------------------------------ */
 
@@ -1536,6 +1608,7 @@ export default function MatePentruLazar() {
   const [calMonth, setCalMonth] = useState(now.getUTCMonth());
   const [selDay, setSelDay] = useState<string | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   // antrenament
   const [topic, setTopic] = useState<Topic | null>(null);
@@ -1792,6 +1865,27 @@ export default function MatePentruLazar() {
     } finally {
       setSharing(false);
     }
+  };
+
+  const buildStatsPrompt = (): string => buildClaudePrompt({
+    total: totals.total, ok: totals.ok, accuracy, stars: progress.stars,
+    bestNota, activeDays, streak: dayStreak, examCount: progress.examHistory.length,
+    perTopic: TOPICS.map((t) => ({
+      name: t.name,
+      ok: progress.perTopic[t.id]?.ok ?? 0,
+      total: progress.perTopic[t.id]?.total ?? 0,
+    })),
+    exams: sortedExams, days: barDays,
+  });
+
+  const askClaude = () => openInClaude(buildStatsPrompt());
+
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(buildStatsPrompt());
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard indisponibil — ignorăm în liniște */ }
   };
 
   /* ---------------- randare ---------------- */
@@ -2105,9 +2199,30 @@ export default function MatePentruLazar() {
             </div>
 
             <h1 style={{ fontSize: 26, margin: "0 0 4px", fontWeight: 800 }}>Statisticile mele</h1>
-            <p className="hand" style={{ fontSize: 18, color: "var(--ink-soft)", margin: "0 0 16px", transform: "rotate(-1deg)" }}>
+            <p className="hand" style={{ fontSize: 18, color: "var(--ink-soft)", margin: "0 0 12px", transform: "rotate(-1deg)" }}>
               tot ce am lucrat până azi 📈
             </p>
+
+            {/* analiză cu Claude */}
+            <div className="card" style={{ padding: 14, marginBottom: 18, background: "#FFFDF6" }}>
+              <div className="display" style={{ fontWeight: 800, fontSize: 15, marginBottom: 4 }}>🤖 Analiză cu Claude</div>
+              <p style={{ fontSize: 13.5, color: "var(--ink-soft)", margin: "0 0 10px" }}>
+                Trimite statisticile către Claude și primești o analiză și un plan de învățare pentru următoarele 2 săptămâni.
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="btn" style={{ fontSize: 14, padding: "8px 16px" }} onClick={askClaude} disabled={totals.total === 0}>
+                  Întreabă-l pe Claude
+                </button>
+                <button className="btn ghost" style={{ fontSize: 14, padding: "8px 16px" }} onClick={copyPrompt} disabled={totals.total === 0}>
+                  {copied ? "✓ Copiat!" : "📋 Copiază promptul"}
+                </button>
+              </div>
+              {totals.total === 0 && (
+                <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "10px 0 0" }}>
+                  Rezolvă câteva exerciții ca să ai ce analiza. ✏️
+                </p>
+              )}
+            </div>
 
             {/* total până la zi */}
             <h2 style={{ fontSize: 17, margin: "0 0 10px", fontWeight: 800 }}>Total până azi</h2>
