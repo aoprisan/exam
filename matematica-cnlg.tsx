@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type CSSProperties } from "react";
 
 /* ------------------------------------------------------------------ */
 /* Tipuri                                                              */
@@ -1162,6 +1162,46 @@ button { font-family: inherit; }
 .bar { height: 8px; border-radius: 6px; background: #E8E3D6; overflow: hidden; }
 .bar > div { height: 100%; background: var(--green-pen); border-radius: 6px; }
 
+/* ---- Harta drumului spre Lazăr ---- */
+.journey { position: relative; }
+.jstop { position: relative; display: flex; gap: 12px; align-items: stretch; }
+/* Drumul: linie întreruptă verticală prin coloana cu medalioane. */
+.jrail { position: relative; flex: none; width: 52px; display: flex; justify-content: center; }
+.jrail::before {
+  content: ""; position: absolute; left: 50%; top: 0; bottom: 0;
+  width: 0; border-left: 3px dashed var(--ink); opacity: .28; transform: translateX(-50%);
+}
+.jstop.start .jrail::before { top: 50%; }
+.jstop.finish .jrail::before { bottom: 50%; }
+.jnode {
+  position: relative; z-index: 1; width: 46px; height: 46px; margin: 7px 0;
+  border-radius: 50%; border: 3px solid var(--ink); background: #fff;
+  display: grid; place-items: center; font-size: 21px; line-height: 1;
+  box-shadow: 2px 2px 0 rgba(33,56,92,.2);
+}
+.jnode.nou { border-style: dashed; opacity: .7; }
+/* În lucru: inel verde proporțional cu progresul (--p = 0..100). */
+.jnode.lucru { background: conic-gradient(var(--green-pen) calc(var(--p,0) * 1%), #E6E1D4 0); padding: 4px; border-color: var(--ink); }
+.jnode.lucru .jicon { width: 100%; height: 100%; border-radius: 50%; background: #fff; display: grid; place-items: center; }
+.jnode.stapanit { background: var(--highlight); }
+.jnode .jbadge {
+  position: absolute; right: -4px; bottom: -4px; width: 20px; height: 20px;
+  border-radius: 50%; background: var(--green-pen); color: #fff;
+  border: 2px solid #fff; display: grid; place-items: center; font-size: 11px; font-weight: 800;
+}
+.jcard {
+  flex: 1; min-width: 0; text-align: left; align-self: center;
+  display: flex; align-items: center; gap: 10px;
+  background: var(--card); border: 2px solid var(--ink); border-radius: 14px;
+  padding: 10px 14px; margin: 5px 0; cursor: pointer;
+  box-shadow: 3px 3px 0 rgba(33,56,92,.15); transition: transform .08s ease;
+}
+.jcard:active { transform: translate(2px,2px); box-shadow: 1px 1px 0 rgba(33,56,92,.15); }
+.jcard.done { background: #F4FBF4; }
+.jstop.start .jlabel, .jstop.finish .jlabel { align-self: center; padding: 8px 4px; }
+.jstatus { font-size: 13px; white-space: nowrap; }
+@media (prefers-reduced-motion: reduce) { .jcard { transition: none; } }
+
 .timer-strip {
   position: sticky; top: 0; z-index: 5;
   background: var(--paper);
@@ -1799,6 +1839,18 @@ const QUICK_QUESTIONS = 9;
 const QUICK_SECONDS = 20 * 60;
 const VARIANTA_SECONDS = 60 * 60;
 
+/** Câte răspunsuri corecte „deblochează" un capitol pe harta drumului spre Lazăr. */
+const MASTERY_OK = 10;
+
+type StopState = "nou" | "lucru" | "stapanit";
+
+/** Starea unui capitol pe hartă, derivată din statistica lui (corecte / total). */
+const masteryOf = (st?: TopicStat): { state: StopState; pct: number } => {
+  if (!st || st.total === 0) return { state: "nou", pct: 0 };
+  const pct = Math.min(100, Math.round((st.ok / MASTERY_OK) * 100));
+  return { state: st.ok >= MASTERY_OK ? "stapanit" : "lucru", pct };
+};
+
 export default function MatePentruLazar() {
   const [screen, setScreen] = useState<Screen>("home");
   const [progress, setProgress] = useState<Progress>(emptyProgress());
@@ -2156,35 +2208,78 @@ export default function MatePentruLazar() {
               📊 Statisticile mele — pe zile, grafice și calendar
             </button>
 
-            <h2 style={{ fontSize: 20, margin: "0 0 10px", fontWeight: 800 }}>Capitole de antrenament</h2>
-            <div style={{ display: "grid", gap: 10 }}>
-              {TOPICS.map((t) => {
-                const st = progress.perTopic[t.id];
-                const pct = st && st.total > 0 ? Math.round((st.ok / st.total) * 100) : null;
-                return (
-                  <button key={t.id} className="topic-card" onClick={() => startPractice(t)}>
-                    <span style={{ fontSize: 26 }}>{t.icon}</span>
-                    <span style={{ flex: 1, minWidth: 0 }}>
-                      <span className="display" style={{ display: "block", fontWeight: 700, fontSize: 16.5 }}>
-                        {t.name}
-                      </span>
-                      <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>{t.sub}</span>
-                      {st && st.total > 0 && (
-                        <span style={{ display: "block", marginTop: 6 }}>
-                          <span className="bar"><div style={{ width: `${pct}%` }} /></span>
-                        </span>
-                      )}
-                    </span>
+            {(() => {
+              const mastered = TOPICS.filter((t) => masteryOf(progress.perTopic[t.id]).state === "stapanit").length;
+              const allDone = mastered === TOPICS.length;
+              return (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", margin: "0 0 4px" }}>
+                    <h2 style={{ fontSize: 20, margin: 0, fontWeight: 800 }}>Drumul spre Lazăr 🗺️</h2>
                     <span className="hand" style={{ fontSize: 17, color: "var(--green-pen)", whiteSpace: "nowrap" }}>
-                      {st && st.total > 0 ? `${st.ok}/${st.total}` : "nou"}
+                      {mastered}/{TOPICS.length} capitole
                     </span>
-                  </button>
-                );
-              })}
-            </div>
-            {!loaded && (
-              <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 14 }}>Se încarcă progresul…</p>
-            )}
+                  </div>
+                  <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "0 0 12px" }}>
+                    Fiecare capitol se deblochează cu {MASTERY_OK} răspunsuri corecte. Adună-le pe toate și ajungi la poarta colegiului!
+                  </p>
+
+                  <div className="journey">
+                    <div className="jstop start">
+                      <div className="jrail"><div className="jnode" style={{ background: "var(--highlight)" }}>✏️</div></div>
+                      <div className="jlabel">
+                        <span className="display" style={{ fontWeight: 800, fontSize: 16 }}>Start</span>
+                        <div style={{ fontSize: 13, color: "var(--ink-soft)" }}>de aici pornește drumul</div>
+                      </div>
+                    </div>
+
+                    {TOPICS.map((t) => {
+                      const st = progress.perTopic[t.id];
+                      const { state, pct } = masteryOf(st);
+                      const statusText =
+                        state === "stapanit" ? "stăpânit! ⭐"
+                          : state === "lucru" ? `${st!.ok}/${MASTERY_OK} corecte`
+                            : "nou — hai să începem";
+                      return (
+                        <div key={t.id} className={`jstop ${state}`}>
+                          <div className="jrail">
+                            <div
+                              className={`jnode ${state}`}
+                              style={state === "lucru" ? ({ "--p": pct } as CSSProperties) : undefined}
+                            >
+                              {state === "lucru" ? <span className="jicon">{t.icon}</span> : t.icon}
+                              {state === "stapanit" && <span className="jbadge">✓</span>}
+                            </div>
+                          </div>
+                          <button className={`jcard${state === "stapanit" ? " done" : ""}`} onClick={() => startPractice(t)}>
+                            <span style={{ flex: 1, minWidth: 0 }}>
+                              <span className="display" style={{ display: "block", fontWeight: 700, fontSize: 16 }}>{t.name}</span>
+                              <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>{t.sub}</span>
+                            </span>
+                            <span className="hand jstatus" style={{ color: state === "stapanit" ? "var(--green-pen)" : "var(--ink-soft)" }}>
+                              {statusText}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    })}
+
+                    <div className="jstop finish">
+                      <div className="jrail"><div className="jnode" style={{ background: allDone ? "var(--highlight)" : "#fff" }}>🏛️</div></div>
+                      <div className="jlabel">
+                        <span className="display" style={{ fontWeight: 800, fontSize: 16 }}>Colegiul Lazăr</span>
+                        <div style={{ fontSize: 13, color: allDone ? "var(--green-pen)" : "var(--ink-soft)" }}>
+                          {allDone ? "Ai cucerit tot drumul! 🎉" : `Mai ai ${TOPICS.length - mastered} capitole până la poartă`}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {!loaded && (
+                    <p style={{ fontSize: 13, color: "var(--ink-soft)", marginTop: 14 }}>Se încarcă progresul…</p>
+                  )}
+                </>
+              );
+            })()}
           </>
         )}
 
