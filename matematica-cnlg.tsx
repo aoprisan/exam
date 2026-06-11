@@ -89,6 +89,8 @@ interface TopicStat {
 interface DayStat {
   ok: number;
   total: number;
+  /** `true` după ce misiunea zilei a fost îndeplinită și răsplata acordată. */
+  quest?: boolean;
 }
 
 interface Progress {
@@ -1842,6 +1844,10 @@ const VARIANTA_SECONDS = 60 * 60;
 /** Câte răspunsuri corecte „deblochează" un capitol pe harta drumului spre Lazăr. */
 const MASTERY_OK = 10;
 
+/** Misiunea zilei: câte exerciții de rezolvat azi și câte stele bonus la final. */
+const DAILY_GOAL = 10;
+const QUEST_REWARD = 5;
+
 type StopState = "nou" | "lucru" | "stapanit";
 
 /** Starea unui capitol pe hartă, derivată din statistica lui (corecte / total). */
@@ -1916,6 +1922,8 @@ export default function MatePentruLazar() {
       const d = p.daily[k] || { ok: 0, total: 0 };
       d.total += 1;
       if (ok) d.ok += 1;
+      // Misiunea zilei: stele bonus o singură dată, când se atinge ținta.
+      if (!d.quest && d.total >= DAILY_GOAL) { d.quest = true; p.stars += QUEST_REWARD; }
       p.daily[k] = d;
       return p;
     });
@@ -2160,6 +2168,35 @@ export default function MatePentruLazar() {
                 caietul meu de pregătire pentru Lazăr ✏️
               </p>
             </header>
+
+            {(() => {
+              const today = progress.daily[todayKey()] ?? { ok: 0, total: 0 };
+              const done = Math.min(DAILY_GOAL, today.total);
+              const complete = today.total >= DAILY_GOAL;
+              const pct = Math.round((done / DAILY_GOAL) * 100);
+              return (
+                <div className="card" style={{ padding: 14, marginBottom: 14, background: complete ? "#F4FBF4" : "#FFFDF6" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                    <span className="display" style={{ fontWeight: 800, fontSize: 15 }}>🎯 Misiunea zilei</span>
+                    <span className="hand" style={{ fontSize: 17, color: complete ? "var(--green-pen)" : "var(--ink-soft)" }}>
+                      {done}/{DAILY_GOAL}
+                    </span>
+                  </div>
+                  {complete ? (
+                    <p className="hand" style={{ fontSize: 19, color: "var(--green-pen)", margin: 0, transform: "rotate(-1deg)" }}>
+                      Misiune îndeplinită! 🎉 +{QUEST_REWARD} ⭐
+                    </p>
+                  ) : (
+                    <>
+                      <span className="bar"><div style={{ width: `${pct}%` }} /></span>
+                      <p style={{ fontSize: 12.5, color: "var(--ink-soft)", margin: "8px 0 0" }}>
+                        Rezolvă {DAILY_GOAL} exerciții azi și primești {QUEST_REWARD} stele bonus ⭐
+                      </p>
+                    </>
+                  )}
+                </div>
+              );
+            })()}
 
             <div className="card" style={{ padding: 14, marginBottom: 14, background: "#FFFDF6" }}>
               <div className="display" style={{ fontWeight: 800, fontSize: 15, marginBottom: 8 }}>Nivel de dificultate</div>
