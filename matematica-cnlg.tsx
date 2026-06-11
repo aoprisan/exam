@@ -85,10 +85,18 @@ interface TopicStat {
   total: number;
 }
 
+/** Răspunsuri dintr-o singură zi, cheia fiind data `YYYY-MM-DD`. */
+interface DayStat {
+  ok: number;
+  total: number;
+}
+
 interface Progress {
   perTopic: Record<string, TopicStat>;
   stars: number;
   examHistory: ExamEntry[];
+  /** Istoric pe zile pentru statistici și calendar (cheia: `YYYY-MM-DD`). */
+  daily: Record<string, DayStat>;
   level: Level;
 }
 
@@ -124,6 +132,30 @@ const normalize = (s: unknown): string =>
 
 const checkAnswer = (user: unknown, correct: unknown): boolean =>
   normalize(user) === normalize(correct);
+
+/* Date — cheile zilelor folosesc data UTC (`YYYY-MM-DD`), la fel ca
+   `examHistory`, ca să se potrivească cu istoricul deja salvat. */
+const dayKey = (d: Date): string => d.toISOString().slice(0, 10);
+const todayKey = (): string => dayKey(new Date());
+
+/** Ultimele `n` chei de zi, terminând cu ziua de azi (inclusiv). */
+const lastDayKeys = (n: number): string[] =>
+  Array.from({ length: n }, (_, i) =>
+    dayKey(new Date(Date.now() - (n - 1 - i) * 86400000)),
+  );
+
+const RO_LUNI = [
+  "ianuarie", "februarie", "martie", "aprilie", "mai", "iunie",
+  "iulie", "august", "septembrie", "octombrie", "noiembrie", "decembrie",
+];
+/** Luni–Duminică, ca în calendarul românesc. */
+const RO_ZILE = ["L", "Ma", "Mi", "J", "V", "S", "D"];
+
+/** Eticheta scurtă „11 iun.” pentru o cheie `YYYY-MM-DD`. */
+const shortDate = (key: string): string => {
+  const [, m, d] = key.split("-");
+  return `${Number(d)} ${RO_LUNI[Number(m) - 1].slice(0, 3)}.`;
+};
 
 /* ------------------------------------------------------------------ */
 /* Generatoare de antrenament — fiecare primește nivelul (1, 2, 3)     */
@@ -841,7 +873,7 @@ const makeVarianta = (): ExamSubject[] => {
 /* Stocare                                                             */
 /* ------------------------------------------------------------------ */
 
-const emptyProgress = (): Progress => ({ perTopic: {}, stars: 0, examHistory: [], level: 2 });
+const emptyProgress = (): Progress => ({ perTopic: {}, stars: 0, examHistory: [], daily: {}, level: 2 });
 
 const loadProgress = async (): Promise<Progress> => {
   try {
@@ -850,6 +882,7 @@ const loadProgress = async (): Promise<Progress> => {
       if (res && res.value) {
         const p = JSON.parse(res.value) as Progress;
         if (!p.level) p.level = 2;
+        if (!p.daily) p.daily = {}; // istoric vechi, fără contor pe zile
         return p;
       }
     }
@@ -1021,6 +1054,70 @@ button { font-family: inherit; }
   font-size: 15px;
   line-height: 1.5;
 }
+
+/* ----- Statistici ----- */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+}
+.stat-tile {
+  background: var(--card);
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  box-shadow: 3px 3px 0 rgba(33,56,92,.12);
+  padding: 12px 14px;
+}
+.stat-tile .big {
+  font-family: "Baloo 2", system-ui, sans-serif;
+  font-weight: 800;
+  font-size: 28px;
+  line-height: 1.05;
+}
+.stat-tile .lbl { font-size: 12.5px; color: var(--ink-soft); margin-top: 2px; }
+
+.day-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px dashed var(--grid);
+}
+.day-row:last-child { border-bottom: none; }
+.day-row .d-date { font-size: 14px; color: var(--ink-soft); width: 72px; flex: none; }
+.day-row .d-bar { flex: 1; }
+.day-row .d-nums { font-family: "Baloo 2", system-ui, sans-serif; font-weight: 700; font-size: 15px; white-space: nowrap; }
+
+/* ----- Calendar ----- */
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.cal-head {
+  text-align: center; font-size: 12px; font-weight: 700;
+  color: var(--ink-soft); padding: 2px 0;
+  font-family: "Baloo 2", system-ui, sans-serif;
+}
+.cal-cell {
+  position: relative;
+  aspect-ratio: 1 / 1;
+  border: 1.5px solid var(--grid);
+  border-radius: 9px;
+  background: #fff;
+  font-family: "Baloo 2", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink);
+  display: flex; align-items: center; justify-content: center;
+  cursor: default;
+  padding: 0;
+}
+.cal-cell.empty { border: none; background: transparent; }
+.cal-cell.active { cursor: pointer; border-color: var(--ink); }
+.cal-cell.today { box-shadow: 0 0 0 2px var(--highlight); }
+.cal-cell.sel { outline: 3px solid var(--red-pen); outline-offset: 1px; }
+.cal-cell .dot {
+  position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+  width: 5px; height: 5px; border-radius: 50%; background: var(--green-pen);
+}
+.cal-cell .exam-mark {
+  position: absolute; top: 2px; right: 4px; font-size: 9px;
+}
 `;
 
 /* ------------------------------------------------------------------ */
@@ -1048,6 +1145,290 @@ const Stars = ({ n }: { n: number }) => (
 
 const mmss = (s: number): string =>
   `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+
+/* ------------------------------------------------------------------ */
+/* Statistici — tile, grafice SVG, calendar                            */
+/* ------------------------------------------------------------------ */
+
+const StatTile = ({ big, lbl, color }: { big: string; lbl: string; color?: string }) => (
+  <div className="stat-tile">
+    <div className="big" style={color ? { color } : undefined}>{big}</div>
+    <div className="lbl">{lbl}</div>
+  </div>
+);
+
+interface DayDatum { key: string; ok: number; total: number }
+
+/* Bare zilnice: total (fundal) + corecte (verde), ultimele zile până azi. */
+const DailyBars = ({ days }: { days: DayDatum[] }) => {
+  const W = 320, H = 150, padB = 22, padT = 8, padX = 4;
+  const maxV = Math.max(1, ...days.map((d) => d.total));
+  const n = days.length;
+  const slot = (W - padX * 2) / n;
+  const bw = Math.min(20, slot * 0.66);
+  const plotH = H - padB - padT;
+  const y = (v: number) => padT + plotH * (1 - v / maxV);
+  const labelEvery = Math.ceil(n / 7);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img"
+      aria-label="Exerciții pe zi: corecte din total">
+      <line x1={padX} y1={y(0)} x2={W - padX} y2={y(0)} stroke="var(--grid)" strokeWidth="1" />
+      {days.map((d, i) => {
+        const cx = padX + slot * i + slot / 2;
+        const x = cx - bw / 2;
+        return (
+          <g key={d.key}>
+            <rect x={x} y={y(d.total)} width={bw} height={y(0) - y(d.total)}
+              rx="2.5" fill="#E2E8F4" />
+            {d.ok > 0 && (
+              <rect x={x} y={y(d.ok)} width={bw} height={y(0) - y(d.ok)}
+                rx="2.5" fill="var(--green-pen)" />
+            )}
+            {i % labelEvery === 0 && (
+              <text x={cx} y={H - 7} textAnchor="middle" fontSize="9" fill="var(--ink-soft)">
+                {Number(d.key.slice(8))}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+};
+
+/* Evoluția notelor la simulări și variante (linie + puncte). */
+const NotaTrend = ({ entries }: { entries: ExamEntry[] }) => {
+  const W = 320, H = 150, padB = 22, padT = 10, padL = 22, padR = 8;
+  const plotW = W - padL - padR, plotH = H - padB - padT;
+  const n = entries.length;
+  const x = (i: number) => padL + (n <= 1 ? plotW / 2 : (plotW * i) / (n - 1));
+  const y = (v: number) => padT + plotH * (1 - v / 10);
+  const pts = entries.map((e, i) => ({ ...e, px: x(i), py: y(e.nota) }));
+  const path = pts.map((p, i) => `${i === 0 ? "M" : "L"}${p.px.toFixed(1)},${p.py.toFixed(1)}`).join(" ");
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img"
+      aria-label="Evoluția notelor la teste">
+      {[0, 5, 9, 10].map((g) => (
+        <g key={g}>
+          <line x1={padL} y1={y(g)} x2={W - padR} y2={y(g)}
+            stroke={g === 5 || g === 9 ? "#E7C9A0" : "var(--grid)"}
+            strokeWidth="1" strokeDasharray={g === 5 || g === 9 ? "3 3" : undefined} />
+          <text x={padL - 4} y={y(g) + 3} textAnchor="end" fontSize="8" fill="var(--ink-soft)">{g}</text>
+        </g>
+      ))}
+      {n > 1 && <path d={path} fill="none" stroke="var(--ink)" strokeWidth="2" />}
+      {pts.map((p, i) => (
+        <circle key={i} cx={p.px} cy={p.py} r="3.5"
+          fill={p.tip === "varianta" ? "var(--red-pen)" : "var(--highlight)"}
+          stroke="var(--ink)" strokeWidth="1.5" />
+      ))}
+    </svg>
+  );
+};
+
+/* Calendar lunar: zilele cu activitate sunt evidențiate; click → detaliu. */
+interface CalendarProps {
+  year: number;
+  month: number; // 0–11
+  daily: Record<string, DayStat>;
+  examDates: Set<string>;
+  selected: string | null;
+  onSelect: (key: string) => void;
+  onMonth: (delta: number) => void;
+  canForward: boolean;
+}
+
+const Calendar = ({ year, month, daily, examDates, selected, onSelect, onMonth, canForward }: CalendarProps) => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const key = (d: number) => `${year}-${pad(month + 1)}-${pad(d)}`;
+  const daysInMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  // getUTCDay: 0=Duminică → vrem să începem de Luni (0=Luni).
+  const firstDow = (new Date(Date.UTC(year, month, 1)).getUTCDay() + 6) % 7;
+  const tk = todayKey();
+  const maxTotal = Math.max(1, ...Object.values(daily).map((d) => d.total));
+  const cells: (number | null)[] = [
+    ...Array.from({ length: firstDow }, () => null),
+    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
+  ];
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <button className="pill" onClick={() => onMonth(-1)} aria-label="Luna anterioară">←</button>
+        <span className="display" style={{ fontWeight: 800, fontSize: 16 }}>
+          {RO_LUNI[month].charAt(0).toUpperCase() + RO_LUNI[month].slice(1)} {year}
+        </span>
+        <button className="pill" onClick={() => onMonth(1)} disabled={!canForward}
+          aria-label="Luna următoare" style={!canForward ? { opacity: .4 } : undefined}>→</button>
+      </div>
+      <div className="cal-grid" style={{ marginBottom: 4 }}>
+        {RO_ZILE.map((z) => <div key={z} className="cal-head">{z}</div>)}
+      </div>
+      <div className="cal-grid">
+        {cells.map((d, i) => {
+          if (d === null) return <div key={`e${i}`} className="cal-cell empty" />;
+          const k = key(d);
+          const stat = daily[k];
+          const active = !!stat;
+          const intensity = stat ? 0.18 + 0.62 * (stat.total / maxTotal) : 0;
+          const cls = ["cal-cell"];
+          if (active) cls.push("active");
+          if (k === tk) cls.push("today");
+          if (k === selected) cls.push("sel");
+          return (
+            <button
+              key={k}
+              className={cls.join(" ")}
+              disabled={!active}
+              onClick={() => active && onSelect(k)}
+              style={active ? { background: `rgba(46, 139, 87, ${intensity})` } : undefined}
+              aria-label={active ? `${d} ${RO_LUNI[month]}: ${stat.ok} din ${stat.total} corecte` : `${d} ${RO_LUNI[month]}`}
+            >
+              {d}
+              {examDates.has(k) && <span className="exam-mark">📜</span>}
+              {active && <span className="dot" />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+/* Construiește un PNG cu rezumatul statisticilor și îl distribuie prin
+   mecanismul nativ al telefonului (Web Share API). Fallback: descărcare. */
+interface ShareStats {
+  ok: number;
+  total: number;
+  accuracy: number;
+  stars: number;
+  activeDays: number;
+  streak: number;
+  examCount: number;
+  bestNota: number | null;
+  days: DayDatum[];
+}
+
+const shareStatsPng = async (s: ShareStats): Promise<void> => {
+  const scale = 2;
+  const W = 540, H = 720;
+  const canvas = document.createElement("canvas");
+  canvas.width = W * scale;
+  canvas.height = H * scale;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  ctx.scale(scale, scale);
+
+  // fundal de „caiet”
+  ctx.fillStyle = "#FBF8F0";
+  ctx.fillRect(0, 0, W, H);
+  ctx.strokeStyle = "#DCE6F2";
+  ctx.lineWidth = 1;
+  for (let x = 26; x < W; x += 26) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke(); }
+  for (let y = 26; y < H; y += 26) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke(); }
+  ctx.strokeStyle = "rgba(214,64,43,0.4)";
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(40, 0); ctx.lineTo(40, H); ctx.stroke();
+
+  const ink = "#21385C", soft = "#5A6E8C", green = "#2E8B57", red = "#D6402B";
+  ctx.textBaseline = "alphabetic";
+
+  ctx.fillStyle = ink;
+  ctx.font = "800 30px system-ui, sans-serif";
+  ctx.fillText("Statisticile mele", 60, 64);
+  ctx.fillStyle = soft;
+  ctx.font = "500 17px system-ui, sans-serif";
+  ctx.fillText("Spre clasa a V‑a · pregătire pentru Lazăr", 60, 90);
+  ctx.fillStyle = ink;
+  ctx.font = "600 13px system-ui, sans-serif";
+  ctx.fillText(shortDate(todayKey()), 60, 112);
+
+  // patru casete cu cifre mari
+  const tiles: [string, string, string][] = [
+    [String(s.total), "exerciții rezolvate", ink],
+    [`${s.accuracy}%`, `${s.ok} corecte`, green],
+    [`⭐ ${s.stars}`, "stele adunate", ink],
+    [s.bestNota != null ? s.bestNota.toFixed(s.bestNota % 1 === 0 ? 0 : 1) : "—", "cea mai bună notă", red],
+  ];
+  const tw = (W - 60 - 60 - 16) / 2, th = 92;
+  tiles.forEach(([big, lbl, col], i) => {
+    const tx = 60 + (i % 2) * (tw + 16);
+    const ty = 132 + Math.floor(i / 2) * (th + 16);
+    ctx.fillStyle = "#fff";
+    ctx.strokeStyle = ink; ctx.lineWidth = 2;
+    roundRect(ctx, tx, ty, tw, th, 12); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.font = "800 34px system-ui, sans-serif";
+    ctx.fillText(big, tx + 16, ty + 48);
+    ctx.fillStyle = soft;
+    ctx.font = "500 14px system-ui, sans-serif";
+    ctx.fillText(lbl, tx + 16, ty + 74);
+  });
+
+  ctx.fillStyle = soft;
+  ctx.font = "600 13px system-ui, sans-serif";
+  ctx.fillText(`${s.activeDays} zile de antrenament · ${s.streak} zile la rând · ${s.examCount} teste date`, 60, 360);
+
+  // mini grafic cu barele zilnice
+  ctx.fillStyle = ink;
+  ctx.font = "700 16px system-ui, sans-serif";
+  ctx.fillText("Exerciții în ultimele zile", 60, 398);
+
+  const gx = 60, gy = 416, gw = W - 120, gh = 220;
+  const maxV = Math.max(1, ...s.days.map((d) => d.total));
+  const n = s.days.length;
+  const slot = gw / n;
+  const bw = Math.min(26, slot * 0.62);
+  ctx.strokeStyle = "#DCE6F2"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(gx, gy + gh); ctx.lineTo(gx + gw, gy + gh); ctx.stroke();
+  s.days.forEach((d, i) => {
+    const cx = gx + slot * i + slot / 2;
+    const bx = cx - bw / 2;
+    const totalH = gh * (d.total / maxV);
+    const okH = gh * (d.ok / maxV);
+    ctx.fillStyle = "#E2E8F4";
+    roundRect(ctx, bx, gy + gh - totalH, bw, totalH, 3); ctx.fill();
+    if (d.ok > 0) { ctx.fillStyle = green; roundRect(ctx, bx, gy + gh - okH, bw, okH, 3); ctx.fill(); }
+    if (i % Math.ceil(n / 7) === 0) {
+      ctx.fillStyle = soft;
+      ctx.font = "10px system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(String(Number(d.key.slice(8))), cx, gy + gh + 16);
+      ctx.textAlign = "left";
+    }
+  });
+
+  ctx.fillStyle = soft;
+  ctx.font = "italic 500 14px system-ui, sans-serif";
+  ctx.textAlign = "center";
+  ctx.fillText("Mate pentru Lazăr ✏️", W / 2, H - 24);
+  ctx.textAlign = "left";
+
+  const blob: Blob | null = await new Promise((res) => canvas.toBlob(res, "image/png"));
+  if (!blob) return;
+  const file = new File([blob], "statistici-mate.png", { type: "image/png" });
+  const nav = navigator as Navigator & { canShare?: (d?: ShareData) => boolean };
+  try {
+    if (nav.canShare && nav.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: "Statisticile mele", text: "Pregătirea mea pentru Lazăr 📐" });
+      return;
+    }
+  } catch { /* utilizatorul a anulat sau share-ul a eșuat — descărcăm */ }
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "statistici-mate.png";
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
 
 /* ------------------------------------------------------------------ */
 /* Cardul de exercițiu (antrenament și simulare rapidă)                 */
@@ -1138,7 +1519,7 @@ const QuestionCard = ({ topic, question, onAnswer, feedback, hideExpl }: Questio
 /* Aplicația                                                           */
 /* ------------------------------------------------------------------ */
 
-type Screen = "home" | "practice" | "quick" | "quickResult" | "varianta" | "variantaResult";
+type Screen = "home" | "practice" | "quick" | "quickResult" | "varianta" | "variantaResult" | "stats";
 
 const QUICK_QUESTIONS = 9;
 const QUICK_SECONDS = 20 * 60;
@@ -1148,6 +1529,13 @@ export default function MatePentruLazar() {
   const [screen, setScreen] = useState<Screen>("home");
   const [progress, setProgress] = useState<Progress>(emptyProgress());
   const [loaded, setLoaded] = useState(false);
+
+  // statistici
+  const now = new Date();
+  const [calYear, setCalYear] = useState(now.getUTCFullYear());
+  const [calMonth, setCalMonth] = useState(now.getUTCMonth());
+  const [selDay, setSelDay] = useState<string | null>(null);
+  const [sharing, setSharing] = useState(false);
 
   // antrenament
   const [topic, setTopic] = useState<Topic | null>(null);
@@ -1197,6 +1585,11 @@ export default function MatePentruLazar() {
       t.total += 1;
       if (ok) { t.ok += 1; p.stars += 1; }
       p.perTopic[topicId] = t;
+      const k = todayKey();
+      const d = p.daily[k] || { ok: 0, total: 0 };
+      d.total += 1;
+      if (ok) d.ok += 1;
+      p.daily[k] = d;
       return p;
     });
   };
@@ -1345,6 +1738,62 @@ export default function MatePentruLazar() {
     : 0;
   const totalParts = varianta ? varianta.reduce((n, s) => n + s.parts.length, 0) : 0;
 
+  /* ---------------- statistici ---------------- */
+
+  const totals = Object.values(progress.perTopic).reduce(
+    (acc, t) => ({ ok: acc.ok + t.ok, total: acc.total + t.total }),
+    { ok: 0, total: 0 },
+  );
+  const accuracy = totals.total ? Math.round((totals.ok / totals.total) * 100) : 0;
+  const activeDays = Object.keys(progress.daily).length;
+  const bestNota = progress.examHistory.length
+    ? Math.max(...progress.examHistory.map((e) => e.nota))
+    : null;
+  const examDates = new Set(progress.examHistory.map((e) => e.date));
+
+  // șir de zile consecutive cu activitate, terminând azi (sau ieri)
+  const dayStreak = (() => {
+    let streak = 0;
+    for (let i = 0; i < 400; i++) {
+      const k = dayKey(new Date(Date.now() - i * 86400000));
+      if (progress.daily[k]) streak += 1;
+      else if (i > 0) break; // azi poate fi încă gol fără a rupe șirul
+    }
+    return streak;
+  })();
+
+  const barDays: DayDatum[] = lastDayKeys(14).map((k) => ({
+    key: k, ok: progress.daily[k]?.ok ?? 0, total: progress.daily[k]?.total ?? 0,
+  }));
+  const sortedExams = [...progress.examHistory].sort((a, b) => a.date.localeCompare(b.date));
+  const recentDays = Object.keys(progress.daily).sort((a, b) => b.localeCompare(a)).slice(0, 10);
+
+  const canForward =
+    calYear < now.getUTCFullYear() ||
+    (calYear === now.getUTCFullYear() && calMonth < now.getUTCMonth());
+
+  const changeMonth = (delta: number) => {
+    setSelDay(null);
+    let m = calMonth + delta, y = calYear;
+    if (m < 0) { m = 11; y -= 1; }
+    if (m > 11) { m = 0; y += 1; }
+    if (y > now.getUTCFullYear() || (y === now.getUTCFullYear() && m > now.getUTCMonth())) return;
+    setCalMonth(m); setCalYear(y);
+  };
+
+  const doShare = async () => {
+    setSharing(true);
+    try {
+      await shareStatsPng({
+        ok: totals.ok, total: totals.total, accuracy, stars: progress.stars,
+        activeDays, streak: dayStreak, examCount: progress.examHistory.length,
+        bestNota, days: barDays,
+      });
+    } finally {
+      setSharing(false);
+    }
+  };
+
   /* ---------------- randare ---------------- */
 
   return (
@@ -1397,10 +1846,18 @@ export default function MatePentruLazar() {
 
             <button
               className="btn ghost"
-              style={{ width: "100%", fontSize: 16, padding: "12px 22px", marginBottom: 18 }}
+              style={{ width: "100%", fontSize: 16, padding: "12px 22px", marginBottom: 10 }}
               onClick={startQuick}
             >
               ⚡ Simulare rapidă — {QUICK_QUESTIONS} întrebări, 20 de minute
+            </button>
+
+            <button
+              className="btn ghost"
+              style={{ width: "100%", fontSize: 16, padding: "12px 22px", marginBottom: 18 }}
+              onClick={() => { setSelDay(null); setCalYear(now.getUTCFullYear()); setCalMonth(now.getUTCMonth()); setScreen("stats"); }}
+            >
+              📊 Statisticile mele — pe zile, grafice și calendar
             </button>
 
             <h2 style={{ fontSize: 20, margin: "0 0 10px", fontWeight: 800 }}>Capitole de antrenament</h2>
@@ -1631,6 +2088,119 @@ export default function MatePentruLazar() {
             <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 18, flexWrap: "wrap" }}>
               <button className="btn" onClick={startVarianta}>Altă variantă</button>
               <button className="btn ghost" onClick={() => setScreen("home")}>Înapoi la capitole</button>
+            </div>
+          </>
+        )}
+
+        {/* ----------------------------- STATISTICI ----------------------------- */}
+        {screen === "stats" && (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <button className="btn ghost" style={{ fontSize: 14, padding: "6px 14px" }} onClick={() => setScreen("home")}>
+                ← Înapoi
+              </button>
+              <button className="btn" style={{ fontSize: 14, padding: "8px 16px" }} onClick={doShare} disabled={sharing}>
+                {sharing ? "Se pregătește…" : "📤 Distribuie ca imagine"}
+              </button>
+            </div>
+
+            <h1 style={{ fontSize: 26, margin: "0 0 4px", fontWeight: 800 }}>Statisticile mele</h1>
+            <p className="hand" style={{ fontSize: 18, color: "var(--ink-soft)", margin: "0 0 16px", transform: "rotate(-1deg)" }}>
+              tot ce am lucrat până azi 📈
+            </p>
+
+            {/* total până la zi */}
+            <h2 style={{ fontSize: 17, margin: "0 0 10px", fontWeight: 800 }}>Total până azi</h2>
+            <div className="stat-grid" style={{ marginBottom: 10 }}>
+              <StatTile big={fmt(totals.total)} lbl="exerciții rezolvate" />
+              <StatTile big={`${accuracy}%`} lbl={`corecte (${fmt(totals.ok)})`} color="var(--green-pen)" />
+              <StatTile big={`⭐ ${progress.stars}`} lbl="stele adunate" />
+              <StatTile big={bestNota != null ? bestNota.toFixed(bestNota % 1 === 0 ? 0 : 1) : "—"} lbl="cea mai bună notă" color="var(--red-pen)" />
+            </div>
+            <div className="stat-grid" style={{ marginBottom: 22 }}>
+              <StatTile big={String(activeDays)} lbl="zile de antrenament" />
+              <StatTile big={String(dayStreak)} lbl="zile la rând 🔥" />
+            </div>
+
+            {/* grafic — exerciții pe zi */}
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div className="display" style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>Exerciții pe zi (ultimele 2 săptămâni)</div>
+              {totals.total === 0 ? (
+                <p style={{ fontSize: 14, color: "var(--ink-soft)", margin: "6px 0" }}>Încă nu ai rezolvat exerciții. Începe un capitol și revino! ✏️</p>
+              ) : (
+                <>
+                  <DailyBars days={barDays} />
+                  <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 4, fontSize: 12.5, color: "var(--ink-soft)" }}>
+                    <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "var(--green-pen)", marginRight: 5 }} />corecte</span>
+                    <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: 2, background: "#E2E8F4", marginRight: 5 }} />total</span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* grafic — evoluția notelor */}
+            <div className="card" style={{ marginBottom: 16 }}>
+              <div className="display" style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>Evoluția notelor la teste</div>
+              {sortedExams.length === 0 ? (
+                <p style={{ fontSize: 14, color: "var(--ink-soft)", margin: "6px 0" }}>Dă o simulare rapidă sau o variantă tip examen ca să apară aici nota. 📜</p>
+              ) : (
+                <>
+                  <NotaTrend entries={sortedExams} />
+                  <div style={{ display: "flex", gap: 16, justifyContent: "center", marginTop: 4, fontSize: 12.5, color: "var(--ink-soft)" }}>
+                    <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "var(--highlight)", border: "1.5px solid var(--ink)", marginRight: 5 }} />simulare rapidă</span>
+                    <span><span style={{ display: "inline-block", width: 10, height: 10, borderRadius: "50%", background: "var(--red-pen)", border: "1.5px solid var(--ink)", marginRight: 5 }} />variantă</span>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* numere pe zi */}
+            {recentDays.length > 0 && (
+              <div className="card" style={{ marginBottom: 16 }}>
+                <div className="display" style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>Pe zile — corecte / total</div>
+                {recentDays.map((k) => {
+                  const d = progress.daily[k];
+                  const pct = d.total ? Math.round((d.ok / d.total) * 100) : 0;
+                  return (
+                    <div className="day-row" key={k}>
+                      <span className="d-date">{shortDate(k)}</span>
+                      <span className="d-bar"><span className="bar"><div style={{ width: `${pct}%` }} /></span></span>
+                      <span className="d-nums">
+                        <span style={{ color: "var(--green-pen)" }}>{d.ok}</span>
+                        <span style={{ color: "var(--ink-soft)" }}> / {d.total}</span>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* calendar */}
+            <div className="card">
+              <div className="display" style={{ fontWeight: 800, fontSize: 15, marginBottom: 10 }}>Calendar de antrenament</div>
+              <Calendar
+                year={calYear}
+                month={calMonth}
+                daily={progress.daily}
+                examDates={examDates}
+                selected={selDay}
+                onSelect={setSelDay}
+                onMonth={changeMonth}
+                canForward={canForward}
+              />
+              {selDay && progress.daily[selDay] && (
+                <div className="expl-box" style={{ marginTop: 12 }}>
+                  <b>{shortDate(selDay)}</b>: {progress.daily[selDay].ok} corecte din {progress.daily[selDay].total} exerciții
+                  {(() => {
+                    const ex = progress.examHistory.filter((e) => e.date === selDay);
+                    if (!ex.length) return null;
+                    return <> · teste: {ex.map((e) => `${e.nota.toFixed(e.nota % 1 === 0 ? 0 : 1)} (${e.tip === "varianta" ? "variantă" : "rapidă"})`).join(", ")}</>;
+                  })()}
+                </div>
+              )}
+              <p style={{ fontSize: 12, color: "var(--ink-soft)", margin: "12px 0 0" }}>
+                Intensitatea verde arată câte exerciții ai lucrat · 📜 = zi cu test · contur galben = azi.
+              </p>
             </div>
           </>
         )}
