@@ -1,15 +1,110 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
+
+/* ------------------------------------------------------------------ */
+/* Tipuri                                                              */
+/* ------------------------------------------------------------------ */
+
+type Level = 1 | 2 | 3;
+
+/** Un exercițiu generat de un capitol de antrenament. */
+interface Question {
+  q: string;
+  a: string;
+  expl: string;
+  /** Prezent doar la întrebările cu variante (multiple-choice). */
+  choices?: string[];
+}
+
+type Generator = (l: Level) => Question;
+
+/** Un capitol din registrul `TOPICS`. */
+interface Topic {
+  id: string;
+  icon: string;
+  name: string;
+  sub: string;
+  gen: Generator;
+}
+
+interface LevelInfo {
+  v: Level;
+  name: string;
+  hint: string;
+}
+
+/** Subiectele 4 și 6 din variantă au mai multe câmpuri de răspuns. */
+interface MultiInputItem {
+  text: string;
+  inputs: { key: string; label: string; a: string }[];
+  expl: string;
+}
+
+/** O cerință dintr-un subiect al variantei tip examen. */
+interface ExamPart {
+  key: string;
+  label: string | null;
+  text: string | null;
+  points: number;
+  a: string;
+  expl: string | null;
+  inputLabel?: string;
+}
+
+interface ExamSubject {
+  nr: number;
+  puncte: number;
+  titlu: string;
+  parts: ExamPart[];
+}
+
+interface GradedPart extends ExamPart {
+  ok: boolean;
+  dat: string;
+}
+
+interface GradedSubject extends Omit<ExamSubject, "parts"> {
+  parts: GradedPart[];
+}
+
+interface ExamResult {
+  detalii: GradedSubject[];
+  punctaj: number;
+  nota: number;
+}
+
+type ExamType = "rapid" | "varianta";
+
+interface ExamEntry {
+  date: string;
+  nota: number;
+  tip: ExamType;
+}
+
+interface TopicStat {
+  ok: number;
+  total: number;
+}
+
+interface Progress {
+  perTopic: Record<string, TopicStat>;
+  stars: number;
+  examHistory: ExamEntry[];
+  level: Level;
+}
+
+type Feedback = { ok: boolean } | null;
 
 /* ------------------------------------------------------------------ */
 /* Utilitare                                                           */
 /* ------------------------------------------------------------------ */
 
-const ri = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
-const pick = (arr) => arr[ri(0, arr.length - 1)];
-const fmt = (n) => n.toLocaleString("ro-RO");
+const ri = (min: number, max: number): number =>
+  Math.floor(Math.random() * (max - min + 1)) + min;
+const pick = <T,>(arr: readonly T[]): T => arr[ri(0, arr.length - 1)];
+const fmt = (n: number): string => n.toLocaleString("ro-RO");
 
-const toRoman = (n) => {
-  const pairs = [
+const toRoman = (n: number): string => {
+  const pairs: [number, string][] = [
     [100, "C"], [90, "XC"], [50, "L"], [40, "XL"],
     [10, "X"], [9, "IX"], [5, "V"], [4, "IV"], [1, "I"],
   ];
@@ -20,21 +115,22 @@ const toRoman = (n) => {
   return out;
 };
 
-const normalize = (s) =>
+const normalize = (s: unknown): string =>
   String(s ?? "")
     .trim()
     .toUpperCase()
     .replace(/[.\s]/g, "")
     .replace(/,/g, "");
 
-const checkAnswer = (user, correct) => normalize(user) === normalize(correct);
+const checkAnswer = (user: unknown, correct: unknown): boolean =>
+  normalize(user) === normalize(correct);
 
 /* ------------------------------------------------------------------ */
 /* Generatoare de antrenament — fiecare primește nivelul (1, 2, 3)     */
 /* Nivel 1: încălzire · Nivel 2: clasa a IV-a · Nivel 3: ca la examen  */
 /* ------------------------------------------------------------------ */
 
-const genAdunareScadere = (l) => {
+const genAdunareScadere: Generator = (l) => {
   if (l === 3) {
     const a = ri(1234, 80000), b = ri(1234, 80000), cMax = a + b - 100;
     const c = ri(500, cMax);
@@ -63,7 +159,7 @@ const genAdunareScadere = (l) => {
   };
 };
 
-const genInmultireImpartire = (l) => {
+const genInmultireImpartire: Generator = (l) => {
   if (l === 1) {
     if (Math.random() < 0.5) {
       const a = ri(2, 9), b = ri(2, 9);
@@ -115,7 +211,7 @@ const genInmultireImpartire = (l) => {
 };
 
 /* Expresie cu paranteze pătrate, ca subiectul 1b) de la examen */
-const makeNested = () => {
+const makeNested = (): Question => {
   const r = ri(2, 9);
   const inner2 = ri(2, 12);
   const P = inner2 * r;
@@ -133,7 +229,7 @@ const makeNested = () => {
 };
 
 /* Expresie cu împărțiri exacte, ca subiectul 1a) de la examen */
-const makeDivExpr = () => {
+const makeDivExpr = (): Question => {
   const b = ri(3, 9), q1 = ri(80, 140), A = q1 * b;
   const d = ri(3, 9), q2 = ri(10, q1 - 10), C = q2 * d;
   const E = ri(500, 2500);
@@ -144,7 +240,7 @@ const makeDivExpr = () => {
   };
 };
 
-const genOrdinea = (l) => {
+const genOrdinea: Generator = (l) => {
   if (l === 1) {
     const a = ri(5, 30), b = ri(2, 5), c = ri(2, 5);
     return {
@@ -193,7 +289,7 @@ const genOrdinea = (l) => {
 };
 
 /* Ecuație în doi pași, ca subiectul 2 de la examen */
-const makeEq2Step = () => {
+const makeEq2Step = (): Question => {
   const v = ri(1, 3);
   if (v === 1) {
     // (x : a − b) : c + d = e  → mersul invers
@@ -227,7 +323,7 @@ const makeEq2Step = () => {
   };
 };
 
-const genNecunoscut = (l) => {
+const genNecunoscut: Generator = (l) => {
   if (l === 3) return makeEq2Step();
   const maxA = l === 1 ? 90 : 480;
   const v = l === 1 ? ri(1, 2) : ri(1, 5);
@@ -272,7 +368,7 @@ const genNecunoscut = (l) => {
 };
 
 /* Numere consecutive, ca subiectul 3 de la examen */
-const makeConsecutive = () => {
+const makeConsecutive = (): Question => {
   const n = ri(20, 400);
   const sum3 = 3 * n + 3; // n + (n+1) + (n+2)
   if (Math.random() < 0.5) {
@@ -290,7 +386,7 @@ const makeConsecutive = () => {
   };
 };
 
-const genFigurativa = (l) => {
+const genFigurativa: Generator = (l) => {
   if (l === 3) return makeConsecutive();
   if (l === 1 || Math.random() < 0.5) {
     const maxS = l === 1 ? 40 : 70;
@@ -323,7 +419,7 @@ const genFigurativa = (l) => {
   };
 };
 
-const genFractii = (l) => {
+const genFractii: Generator = (l) => {
   if (l === 1) {
     const b = pick([2, 4]), N = b * ri(3, 12);
     return {
@@ -381,7 +477,14 @@ const genFractii = (l) => {
   };
 };
 
-const CONVS = [
+interface Conv {
+  from: string;
+  to: string;
+  k: number;
+  range: [number, number];
+}
+
+const CONVS: Conv[] = [
   { from: "km", to: "m", k: 1000, range: [2, 45] },
   { from: "m", to: "cm", k: 100, range: [3, 80] },
   { from: "m", to: "mm", k: 1000, range: [2, 15] },
@@ -393,7 +496,7 @@ const CONVS = [
   { from: "zile", to: "ore", k: 24, range: [2, 14] },
 ];
 
-const genUnitati = (l) => {
+const genUnitati: Generator = (l) => {
   if (l === 3) {
     const c = pick([
       { big: "m", small: "cm", k: 100 },
@@ -410,7 +513,7 @@ const genUnitati = (l) => {
   }
   const conv = l === 1 ? pick(CONVS.slice(0, 2).concat(CONVS.slice(6, 7))) : pick(CONVS);
   if (l !== 1 && Math.random() < 0.3) {
-    const n = ri(...conv.range);
+    const n = ri(conv.range[0], conv.range[1]);
     return {
       q: `${fmt(n * conv.k)} ${conv.to} = ? ${conv.from}`,
       a: String(n),
@@ -425,7 +528,7 @@ const genUnitati = (l) => {
   };
 };
 
-const genGeometrie = (l) => {
+const genGeometrie: Generator = (l) => {
   if (l === 1) {
     const s = ri(3, 20);
     return {
@@ -485,13 +588,13 @@ const genGeometrie = (l) => {
   };
 };
 
-const TRICKY_ROMAN = [];
+const TRICKY_ROMAN: number[] = [];
 for (let i = 1; i <= 100; i++) {
   const u = i % 10;
   if (u === 4 || u === 9 || (i >= 40 && i <= 49) || (i >= 90 && i <= 99)) TRICKY_ROMAN.push(i);
 }
 
-const genRomane = (l) => {
+const genRomane: Generator = (l) => {
   const n = l === 1 ? ri(1, 20) : l === 3 ? pick(TRICKY_ROMAN) : ri(1, 100);
   if (Math.random() < 0.5) {
     return {
@@ -507,7 +610,7 @@ const genRomane = (l) => {
   };
 };
 
-const genRotunjire = (l) => {
+const genRotunjire: Generator = (l) => {
   if (l === 3) {
     const a = ri(100, 9000), b = a + ri(15, 400);
     return {
@@ -552,7 +655,7 @@ const genRotunjire = (l) => {
 };
 
 /* Mersul invers cu fracții, ca subiectul 5 de la examen */
-const makeMersInvers = () => {
+const makeMersInvers = (): Question => {
   const R = ri(8, 40);
   const k = 2 * ri(1, 6);
   const N = 3 * (R + k / 2);
@@ -568,7 +671,7 @@ const makeMersInvers = () => {
   };
 };
 
-const genProbleme = (l) => {
+const genProbleme: Generator = (l) => {
   if (l === 1) {
     if (Math.random() < 0.5) {
       const a = ri(12, 80), b = ri(10, 70);
@@ -624,7 +727,7 @@ const genProbleme = (l) => {
 /* Capitole                                                            */
 /* ------------------------------------------------------------------ */
 
-const TOPICS = [
+const TOPICS: Topic[] = [
   { id: "adun", icon: "➕", name: "Adunare și scădere", sub: "numere până la 1.000.000", gen: genAdunareScadere },
   { id: "inmul", icon: "✖️", name: "Înmulțire și împărțire", sub: "cu rest și fără rest", gen: genInmultireImpartire },
   { id: "ordine", icon: "🧮", name: "Ordinea operațiilor", sub: "paranteze rotunde și pătrate", gen: genOrdinea },
@@ -638,7 +741,7 @@ const TOPICS = [
   { id: "probl", icon: "📖", name: "Probleme", sub: "cu mai multe operații", gen: genProbleme },
 ];
 
-const LEVELS = [
+const LEVELS: LevelInfo[] = [
   { v: 1, name: "Încălzire", hint: "pentru început" },
   { v: 2, name: "Clasa a IV-a", hint: "nivelul programei" },
   { v: 3, name: "Ca la examen", hint: "subiecte grele" },
@@ -649,7 +752,7 @@ const LEVELS = [
 /* 6 subiecte, 60 de minute, 100 p (10 din oficiu)                      */
 /* ------------------------------------------------------------------ */
 
-const makeComparatie = () => {
+const makeComparatie = (): MultiInputItem => {
   let pm = ri(2, 9), ps = ri(3, 12);
   while (ps === pm) ps = ri(3, 12);
   const a = ri(10, 30), b = ri(5, 25);
@@ -666,7 +769,7 @@ const makeComparatie = () => {
   };
 };
 
-const makePerspicacitate = () => {
+const makePerspicacitate = (): MultiInputItem => {
   if (Math.random() < 0.5) {
     const x = 2 * ri(5, 60) + 1;
     const S = 2 * x + 2;
@@ -677,7 +780,7 @@ const makePerspicacitate = () => {
     };
   }
   const base = pick([2, 3, 4, 7, 8, 9]);
-  const cycles = { 2: [2, 4, 8, 6], 3: [3, 9, 7, 1], 4: [4, 6], 7: [7, 9, 3, 1], 8: [8, 4, 2, 6], 9: [9, 1] };
+  const cycles: Record<number, number[]> = { 2: [2, 4, 8, 6], 3: [3, 9, 7, 1], 4: [4, 6], 7: [7, 9, 3, 1], 8: [8, 4, 2, 6], 9: [9, 1] };
   const cyc = cycles[base];
   const n = ri(5, 30);
   const ans = cyc[(n - 1) % cyc.length];
@@ -688,7 +791,7 @@ const makePerspicacitate = () => {
   };
 };
 
-const makeVarianta = () => {
+const makeVarianta = (): ExamSubject[] => {
   const s1a = makeDivExpr();
   const s1b = makeNested();
   const s2a = makeEq2Step();
@@ -718,7 +821,7 @@ const makeVarianta = () => {
     },
     {
       nr: 4, puncte: 20, titlu: "",
-      parts: s4.inputs.map((inp, i) => ({
+      parts: s4.inputs.map((inp, i): ExamPart => ({
         key: `4${i}`, label: i === 0 ? "" : null, text: i === 0 ? s4.text : null,
         points: 10, a: inp.a, expl: i === 0 ? s4.expl : null, inputLabel: inp.label,
       })),
@@ -738,28 +841,28 @@ const makeVarianta = () => {
 /* Stocare                                                             */
 /* ------------------------------------------------------------------ */
 
-const emptyProgress = () => ({ perTopic: {}, stars: 0, examHistory: [], level: 2 });
+const emptyProgress = (): Progress => ({ perTopic: {}, stars: 0, examHistory: [], level: 2 });
 
-const loadProgress = async () => {
+const loadProgress = async (): Promise<Progress> => {
   try {
     if (typeof window !== "undefined" && window.storage) {
       const res = await window.storage.get("mate-progres-v1");
       if (res && res.value) {
-        const p = JSON.parse(res.value);
+        const p = JSON.parse(res.value) as Progress;
         if (!p.level) p.level = 2;
         return p;
       }
     }
-  } catch (e) { /* prima utilizare */ }
+  } catch { /* prima utilizare */ }
   return emptyProgress();
 };
 
-const saveProgress = async (p) => {
+const saveProgress = async (p: Progress): Promise<void> => {
   try {
     if (typeof window !== "undefined" && window.storage) {
       await window.storage.set("mate-progres-v1", JSON.stringify(p));
     }
-  } catch (e) { /* ignoră */ }
+  } catch { /* ignoră */ }
 };
 
 /* ------------------------------------------------------------------ */
@@ -924,7 +1027,7 @@ button { font-family: inherit; }
 /* Componente mici                                                     */
 /* ------------------------------------------------------------------ */
 
-const Verdict = ({ ok, correct }) => (
+const Verdict = ({ ok, correct }: { ok: boolean; correct: string }) => (
   <div className="verdict" style={{ marginTop: 14 }}>
     <div
       className="hand"
@@ -939,20 +1042,28 @@ const Verdict = ({ ok, correct }) => (
   </div>
 );
 
-const Stars = ({ n }) => (
+const Stars = ({ n }: { n: number }) => (
   <span className="display" style={{ fontWeight: 800, fontSize: 18 }}>⭐ {n}</span>
 );
 
-const mmss = (s) =>
+const mmss = (s: number): string =>
   `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 
 /* ------------------------------------------------------------------ */
 /* Cardul de exercițiu (antrenament și simulare rapidă)                 */
 /* ------------------------------------------------------------------ */
 
-const QuestionCard = ({ topic, question, onAnswer, feedback, hideExpl }) => {
+interface QuestionCardProps {
+  topic: Topic;
+  question: Question;
+  onAnswer: (input: string) => void;
+  feedback: Feedback;
+  hideExpl?: boolean;
+}
+
+const QuestionCard = ({ topic, question, onAnswer, feedback, hideExpl }: QuestionCardProps) => {
   const [input, setInput] = useState("");
-  const inputRef = useRef(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setInput("");
@@ -1027,38 +1138,40 @@ const QuestionCard = ({ topic, question, onAnswer, feedback, hideExpl }) => {
 /* Aplicația                                                           */
 /* ------------------------------------------------------------------ */
 
+type Screen = "home" | "practice" | "quick" | "quickResult" | "varianta" | "variantaResult";
+
 const QUICK_QUESTIONS = 9;
 const QUICK_SECONDS = 20 * 60;
 const VARIANTA_SECONDS = 60 * 60;
 
 export default function MatePentruLazar() {
-  const [screen, setScreen] = useState("home");
-  const [progress, setProgress] = useState(emptyProgress());
+  const [screen, setScreen] = useState<Screen>("home");
+  const [progress, setProgress] = useState<Progress>(emptyProgress());
   const [loaded, setLoaded] = useState(false);
 
   // antrenament
-  const [topic, setTopic] = useState(null);
-  const [question, setQuestion] = useState(null);
-  const [feedback, setFeedback] = useState(null);
+  const [topic, setTopic] = useState<Topic | null>(null);
+  const [question, setQuestion] = useState<Question | null>(null);
+  const [feedback, setFeedback] = useState<Feedback>(null);
   const [streak, setStreak] = useState(0);
-  const [session, setSession] = useState({ ok: 0, total: 0 });
+  const [session, setSession] = useState<{ ok: number; total: number }>({ ok: 0, total: 0 });
 
   // simulare rapidă
-  const [quickQs, setQuickQs] = useState([]);
+  const [quickQs, setQuickQs] = useState<{ topic: Topic; q: Question }[]>([]);
   const [quickIdx, setQuickIdx] = useState(0);
   const [quickOk, setQuickOk] = useState(0);
   const [quickLeft, setQuickLeft] = useState(QUICK_SECONDS);
-  const [lastNota, setLastNota] = useState(null);
+  const [lastNota, setLastNota] = useState<{ nota: number; ok: number; punctaj: number } | null>(null);
   const quickOkRef = useRef(0);
-  const timerRef = useRef(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // varianta tip examen
-  const [varianta, setVarianta] = useState(null);
-  const [varAnswers, setVarAnswers] = useState({});
+  const [varianta, setVarianta] = useState<ExamSubject[] | null>(null);
+  const [varAnswers, setVarAnswers] = useState<Record<string, string>>({});
   const [varLeft, setVarLeft] = useState(VARIANTA_SECONDS);
-  const [varResult, setVarResult] = useState(null);
-  const varTimerRef = useRef(null);
-  const varAnswersRef = useRef({});
+  const [varResult, setVarResult] = useState<ExamResult | null>(null);
+  const varTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const varAnswersRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     loadProgress().then((p) => { setProgress(p); setLoaded(true); });
@@ -1067,7 +1180,7 @@ export default function MatePentruLazar() {
   useEffect(() => { varAnswersRef.current = varAnswers; }, [varAnswers]);
   useEffect(() => { quickOkRef.current = quickOk; }, [quickOk]);
 
-  const updateProgress = useCallback((fn) => {
+  const updateProgress = useCallback((fn: (p: Progress) => Progress) => {
     setProgress((prev) => {
       const next = fn(structuredClone(prev));
       saveProgress(next);
@@ -1075,10 +1188,10 @@ export default function MatePentruLazar() {
     });
   }, []);
 
-  const level = progress.level || 2;
-  const setLevel = (v) => updateProgress((p) => { p.level = v; return p; });
+  const level: Level = progress.level || 2;
+  const setLevel = (v: Level) => updateProgress((p) => { p.level = v; return p; });
 
-  const recordAnswer = (topicId, ok) => {
+  const recordAnswer = (topicId: string, ok: boolean) => {
     updateProgress((p) => {
       const t = p.perTopic[topicId] || { ok: 0, total: 0 };
       t.total += 1;
@@ -1090,7 +1203,7 @@ export default function MatePentruLazar() {
 
   /* ---------------- antrenament ---------------- */
 
-  const startPractice = (t) => {
+  const startPractice = (t: Topic) => {
     setTopic(t);
     setQuestion(t.gen(level));
     setFeedback(null);
@@ -1099,7 +1212,8 @@ export default function MatePentruLazar() {
     setScreen("practice");
   };
 
-  const answerPractice = (input) => {
+  const answerPractice = (input: string) => {
+    if (!topic || !question) return;
     const ok = checkAnswer(input, question.a);
     setFeedback({ ok });
     setStreak((s) => (ok ? s + 1 : 0));
@@ -1108,6 +1222,7 @@ export default function MatePentruLazar() {
   };
 
   const nextPractice = () => {
+    if (!topic) return;
     setQuestion(topic.gen(level));
     setFeedback(null);
   };
@@ -1124,22 +1239,7 @@ export default function MatePentruLazar() {
     setScreen("quick");
   };
 
-  useEffect(() => {
-    if (screen !== "quick") {
-      if (timerRef.current) clearInterval(timerRef.current);
-      return;
-    }
-    timerRef.current = setInterval(() => {
-      setQuickLeft((s) => {
-        if (s <= 1) { clearInterval(timerRef.current); finishQuick(); return 0; }
-        return s - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timerRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [screen]);
-
-  const finishQuick = (finalOk) => {
+  const finishQuick = (finalOk?: number) => {
     const ok = typeof finalOk === "number" ? finalOk : quickOkRef.current;
     const punctaj = ok * 10 + 10;
     const nota = punctaj / 10;
@@ -1152,7 +1252,22 @@ export default function MatePentruLazar() {
     setScreen("quickResult");
   };
 
-  const answerQuick = (input) => {
+  useEffect(() => {
+    if (screen !== "quick") {
+      if (timerRef.current) clearInterval(timerRef.current);
+      return;
+    }
+    timerRef.current = setInterval(() => {
+      setQuickLeft((s) => {
+        if (s <= 1) { if (timerRef.current) clearInterval(timerRef.current); finishQuick(); return 0; }
+        return s - 1;
+      });
+    }, 1000);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen]);
+
+  const answerQuick = (input: string) => {
     const current = quickQs[quickIdx];
     const ok = checkAnswer(input, current.q.a);
     setFeedback({ ok });
@@ -1179,10 +1294,10 @@ export default function MatePentruLazar() {
     setScreen("varianta");
   };
 
-  const gradeVarianta = useCallback((subiecte, answers) => {
+  const gradeVarianta = useCallback((subiecte: ExamSubject[], answers: Record<string, string>): ExamResult => {
     let total = 10; // din oficiu
-    const detalii = subiecte.map((s) => {
-      const parts = s.parts.map((part) => {
+    const detalii: GradedSubject[] = subiecte.map((s) => {
+      const parts: GradedPart[] = s.parts.map((part) => {
         const ok = checkAnswer(answers[part.key], part.a);
         if (ok) total += part.points;
         return { ...part, ok, dat: answers[part.key] ?? "" };
@@ -1214,11 +1329,11 @@ export default function MatePentruLazar() {
     }
     varTimerRef.current = setInterval(() => {
       setVarLeft((s) => {
-        if (s <= 1) { clearInterval(varTimerRef.current); finishVarianta(); return 0; }
+        if (s <= 1) { if (varTimerRef.current) clearInterval(varTimerRef.current); finishVarianta(); return 0; }
         return s - 1;
       });
     }, 1000);
-    return () => clearInterval(varTimerRef.current);
+    return () => { if (varTimerRef.current) clearInterval(varTimerRef.current); };
   }, [screen, finishVarianta]);
 
   /* ---------------- date derivate ---------------- */

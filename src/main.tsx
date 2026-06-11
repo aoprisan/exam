@@ -1,6 +1,6 @@
-import React from "react";
+import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import MatePentruLazar from "../matematica-cnlg.jsx";
+import MatePentruLazar from "../matematica-cnlg.tsx";
 
 // The app persists progress through an optional `window.storage` host API
 // (async get/set returning { value }). In the browser we back it with
@@ -14,8 +14,8 @@ if (typeof window !== "undefined" && !window.storage) {
   };
 }
 
-createRoot(document.getElementById("root")).render(
-  <React.StrictMode>
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
     <MatePentruLazar />
-  </React.StrictMode>
+  </StrictMode>,
 );
