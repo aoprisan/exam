@@ -101,6 +101,8 @@ interface Progress {
   daily: Record<string, DayStat>;
   /** Insignele câștigate (cheia: id-ul insignei, valoarea: data `YYYY-MM-DD`). */
   badges: Record<string, string>;
+  /** Sunet și vibrație la răspuns (preferință de pe dispozitiv). */
+  sound: boolean;
   level: Level;
 }
 
@@ -1003,7 +1005,7 @@ const makeVarianta = (): ExamSubject[] => {
 /* Stocare                                                             */
 /* ------------------------------------------------------------------ */
 
-const emptyProgress = (): Progress => ({ perTopic: {}, stars: 0, examHistory: [], daily: {}, badges: {}, level: 2 });
+const emptyProgress = (): Progress => ({ perTopic: {}, stars: 0, examHistory: [], daily: {}, badges: {}, sound: true, level: 2 });
 
 const loadProgress = async (): Promise<Progress> => {
   try {
@@ -1014,6 +1016,7 @@ const loadProgress = async (): Promise<Progress> => {
         if (p.level == null) p.level = 2;
         if (!p.daily) p.daily = {}; // istoric vechi, fără contor pe zile
         if (!p.badges) p.badges = {}; // istoric vechi, fără insigne
+        if (p.sound == null) p.sound = true; // implicit pornit
         return p;
       }
     }
@@ -2048,6 +2051,46 @@ const awardBadges = (p: Progress): string[] => {
   return fresh;
 };
 
+/* ------------------------------------------------------------------ */
+/* Sunet (Web Audio, fără fișiere) și vibrație                         */
+/* ------------------------------------------------------------------ */
+
+let _audioCtx: AudioContext | null = null;
+const audioCtx = (): AudioContext | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AC) return null;
+    if (!_audioCtx) _audioCtx = new AC();
+    if (_audioCtx.state === "suspended") void _audioCtx.resume();
+    return _audioCtx;
+  } catch { return null; }
+};
+
+/** Un singur ton scurt cu atac/decay simplu. */
+const tone = (ctx: AudioContext, freq: number, start: number, dur: number, type: OscillatorType = "sine", peak = 0.12): void => {
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  const t0 = ctx.currentTime + start;
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.linearRampToValueAtTime(peak, t0 + 0.012);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g);
+  g.connect(ctx.destination);
+  osc.start(t0);
+  osc.stop(t0 + dur + 0.03);
+};
+
+const playCorrect = (): void => { const c = audioCtx(); if (c) { tone(c, 660, 0, 0.12); tone(c, 990, 0.09, 0.16); } };
+const playWrong = (): void => { const c = audioCtx(); if (c) tone(c, 196, 0, 0.22, "triangle", 0.09); };
+const playFanfare = (): void => { const c = audioCtx(); if (c) [523, 659, 784, 1047].forEach((f, i) => tone(c, f, i * 0.1, 0.24, "triangle", 0.1)); };
+
+const vibrate = (pattern: number | number[]): void => {
+  try { if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(pattern); } catch { /* fără vibrație */ }
+};
+
 export default function MatePentruLazar() {
   const [screen, setScreen] = useState<Screen>("home");
   const [progress, setProgress] = useState<Progress>(emptyProgress());
@@ -2120,7 +2163,10 @@ export default function MatePentruLazar() {
     }
     prevBadgesRef.current = curBadges;
     prevRankRef.current = curRank;
-    if (fresh.length) setCelebs((q) => [...q, ...fresh]);
+    if (fresh.length) {
+      setCelebs((q) => [...q, ...fresh]);
+      if (progress.sound) playFanfare();
+    }
   }, [progress, loaded]);
 
   // Afișează sărbătorile pe rând, câte ~3,4s.
@@ -2140,6 +2186,14 @@ export default function MatePentruLazar() {
 
   const level: Level = progress.level ?? 2;
   const setLevel = (v: Level) => updateProgress((p) => { p.level = v; return p; });
+  const toggleSound = () => updateProgress((p) => { p.sound = !p.sound; if (p.sound) playCorrect(); return p; });
+
+  /** Sunet + vibrație la un răspuns, dacă preferința e pornită. */
+  const feedbackFx = (ok: boolean) => {
+    if (!progress.sound) return;
+    if (ok) { playCorrect(); vibrate(25); }
+    else { playWrong(); vibrate(60); }
+  };
 
   const recordAnswer = (topicId: string, ok: boolean) => {
     updateProgress((p) => {
@@ -2174,6 +2228,7 @@ export default function MatePentruLazar() {
     if (!topic || !question) return;
     const ok = checkAnswer(input, question.a);
     setFeedback({ ok });
+    feedbackFx(ok);
     setStreak((s) => (ok ? s + 1 : 0));
     setSession((s) => ({ ok: s.ok + (ok ? 1 : 0), total: s.total + 1 }));
     recordAnswer(topic.id, ok);
@@ -2230,6 +2285,7 @@ export default function MatePentruLazar() {
     const current = quickQs[quickIdx];
     const ok = checkAnswer(input, current.q.a);
     setFeedback({ ok });
+    feedbackFx(ok);
     recordAnswer(current.topic.id, ok);
     if (ok) setQuickOk((n) => n + 1);
   };
@@ -2397,7 +2453,19 @@ export default function MatePentruLazar() {
             <header style={{ marginBottom: 16 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <h1 style={{ fontSize: 30, margin: 0, fontWeight: 800 }}>Spre clasa a V‑a</h1>
-                <Stars n={progress.stars} />
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <button
+                    className="pill"
+                    style={{ padding: "5px 11px", fontSize: 16 }}
+                    onClick={toggleSound}
+                    aria-pressed={progress.sound}
+                    aria-label={progress.sound ? "Oprește sunetul" : "Pornește sunetul"}
+                    title={progress.sound ? "Sunet pornit" : "Sunet oprit"}
+                  >
+                    {progress.sound ? "🔊" : "🔇"}
+                  </button>
+                  <Stars n={progress.stars} />
+                </div>
               </div>
               <p className="hand" style={{ fontSize: 21, color: "var(--ink-soft)", margin: "4px 0 0", transform: "rotate(-1deg)" }}>
                 caietul meu de pregătire pentru Lazăr ✏️
