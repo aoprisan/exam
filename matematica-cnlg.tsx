@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 /* Tipuri                                                              */
 /* ------------------------------------------------------------------ */
 
-type Level = 1 | 2 | 3;
+type Level = 0 | 1 | 2 | 3;
 
 /** Un exercițiu generat de un capitol de antrenament. */
 interface Question {
@@ -158,8 +158,9 @@ const shortDate = (key: string): string => {
 };
 
 /* ------------------------------------------------------------------ */
-/* Generatoare de antrenament — fiecare primește nivelul (1, 2, 3)     */
-/* Nivel 1: încălzire · Nivel 2: clasa a IV-a · Nivel 3: ca la examen  */
+/* Generatoare de antrenament — fiecare primește nivelul (0, 1, 2, 3)  */
+/* Nivel 1: încălzire · Nivel 0: clasa a III-a · Nivel 2: clasa a IV-a  */
+/* · Nivel 3: ca la examen                                             */
 /* ------------------------------------------------------------------ */
 
 const genAdunareScadere: Generator = (l) => {
@@ -172,8 +173,8 @@ const genAdunareScadere: Generator = (l) => {
       expl: `Întâi adunarea: ${fmt(a)} + ${fmt(b)} = ${fmt(a + b)}. Apoi scăderea: ${fmt(a + b)} − ${fmt(c)} = ${fmt(a + b - c)}.`,
     };
   }
-  const lo = l === 1 ? 120 : 1234;
-  const hi = l === 1 ? 9800 : 487650;
+  const lo = l === 1 ? 120 : l === 0 ? 100 : 1234;
+  const hi = l === 1 ? 9800 : l === 0 ? 9999 : 487650;
   if (Math.random() < 0.5) {
     const a = ri(lo, hi), b = ri(lo, hi);
     return {
@@ -199,6 +200,14 @@ const genInmultireImpartire: Generator = (l) => {
     }
     const cat = ri(2, 9), d = ri(2, 9);
     return { q: `${cat * d} : ${d} =`, a: String(cat), expl: `Din tabla împărțirii: ${cat} × ${d} = ${cat * d}, deci câtul este ${cat}.` };
+  }
+  if (l === 0) {
+    if (Math.random() < 0.5) {
+      const a = ri(12, 99), b = ri(2, 9);
+      return { q: `${a} × ${b} =`, a: String(a * b), expl: `Înmulțim ${a} cu ${b}, cu trecere peste ordin: ${a} × ${b} = ${a * b}.` };
+    }
+    const cat = ri(11, 99), d = ri(2, 9);
+    return { q: `${cat * d} : ${d} =`, a: String(cat), expl: `Verificare: ${cat} × ${d} = ${cat * d}, deci câtul este ${cat}.` };
   }
   if (l === 3) {
     if (Math.random() < 0.5) {
@@ -282,6 +291,31 @@ const genOrdinea: Generator = (l) => {
     };
   }
   if (l === 3) return Math.random() < 0.5 ? makeNested() : makeDivExpr();
+  if (l === 0) {
+    const t = ri(1, 3);
+    if (t === 1) {
+      const a = ri(20, 90), b = ri(2, 9), c = ri(2, 9);
+      return {
+        q: `${a} + ${b} × ${c} =`,
+        a: String(a + b * c),
+        expl: `Întâi înmulțirea: ${b} × ${c} = ${b * c}. Apoi adunarea: ${a} + ${b * c} = ${a + b * c}.`,
+      };
+    }
+    if (t === 2) {
+      const c = ri(2, 9), q2 = ri(2, 9), b = c * q2, a = ri(b + 2, b + 50);
+      return {
+        q: `${a} − ${b} : ${c} =`,
+        a: String(a - q2),
+        expl: `Întâi împărțirea: ${b} : ${c} = ${q2}. Apoi scăderea: ${a} − ${q2} = ${a - q2}.`,
+      };
+    }
+    const a = ri(3, 15), b = ri(3, 15), c = ri(2, 5);
+    return {
+      q: `(${a} + ${b}) × ${c} =`,
+      a: String((a + b) * c),
+      expl: `Întâi paranteza: ${a} + ${b} = ${a + b}. Apoi înmulțirea: ${a + b} × ${c} = ${(a + b) * c}.`,
+    };
+  }
   const v = ri(1, 4);
   if (v === 1) {
     const a = ri(10, 90), b = ri(2, 9), c = ri(2, 9);
@@ -357,7 +391,7 @@ const makeEq2Step = (): Question => {
 
 const genNecunoscut: Generator = (l) => {
   if (l === 3) return makeEq2Step();
-  const maxA = l === 1 ? 90 : 480;
+  const maxA = l === 1 ? 90 : l === 0 ? 300 : 480;
   const v = l === 1 ? ri(1, 2) : ri(1, 5);
   if (v === 1) {
     const x = ri(15, maxA), a = ri(12, maxA);
@@ -420,6 +454,24 @@ const makeConsecutive = (): Question => {
 
 const genFigurativa: Generator = (l) => {
   if (l === 3) return makeConsecutive();
+  if (l === 0) {
+    if (Math.random() < 0.5) {
+      const small = ri(6, 50), d = ri(3, 30), large = small + d, S = small + large;
+      const askSmall = Math.random() < 0.5;
+      return {
+        q: `Suma a două numere este ${S}, iar diferența lor este ${d}. Care este numărul mai ${askSmall ? "mic" : "mare"}?`,
+        a: String(askSmall ? small : large),
+        expl: `Numărul mic = (sumă − diferență) : 2 = (${S} − ${d}) : 2 = ${small}. Numărul mare = ${small} + ${d} = ${large}.`,
+      };
+    }
+    const small = ri(4, 50), k = ri(2, 4), large = small * k, S = small + large;
+    const askSmall = Math.random() < 0.5;
+    return {
+      q: `Suma a două numere este ${S}. Unul dintre ele este de ${k} ori mai mare decât celălalt. Care este numărul mai ${askSmall ? "mic" : "mare"}?`,
+      a: String(askSmall ? small : large),
+      expl: `Desenăm segmente: numărul mic = 1 segment, cel mare = ${k} segmente, în total ${k + 1} segmente. Un segment = ${S} : ${k + 1} = ${small}. Numărul mare = ${small} × ${k} = ${large}.`,
+    };
+  }
   if (l === 1 || Math.random() < 0.5) {
     const maxS = l === 1 ? 40 : 70;
     if (l !== 1 && Math.random() < 0.5) {
@@ -458,6 +510,15 @@ const genFractii: Generator = (l) => {
       q: `Cât este ${b === 2 ? "jumătate" : "un sfert"} din ${N}?`,
       a: String(N / b),
       expl: `Împărțim la ${b}: ${N} : ${b} = ${N / b}.`,
+    };
+  }
+  if (l === 0) {
+    const opt = pick([{ b: 2, name: "jumătate" }, { b: 3, name: "o treime" }, { b: 4, name: "un sfert" }]);
+    const N = opt.b * ri(2, 12);
+    return {
+      q: `Cât este ${opt.name} din ${N}?`,
+      a: String(N / opt.b),
+      expl: `Împărțim la ${opt.b}: ${N} : ${opt.b} = ${N / opt.b}.`,
     };
   }
   if (l === 3) {
@@ -543,6 +604,15 @@ const genUnitati: Generator = (l) => {
       expl: `${a} ${c.big} = ${a} × ${fmt(c.k)} = ${fmt(a * c.k)} ${c.small}. Adunăm: ${fmt(a * c.k)} + ${b} = ${fmt(a * c.k + b)} ${c.small}.`,
     };
   }
+  if (l === 0) {
+    const conv = pick(CONVS.slice(0, 2).concat(CONVS.slice(3, 4), CONVS.slice(6, 7)));
+    const n = ri(conv.range[0], Math.min(20, conv.range[1]));
+    return {
+      q: `${n} ${conv.from} = ? ${conv.to}`,
+      a: String(n * conv.k),
+      expl: `Înmulțim cu ${fmt(conv.k)}: ${n} × ${fmt(conv.k)} = ${fmt(n * conv.k)} ${conv.to}.`,
+    };
+  }
   const conv = l === 1 ? pick(CONVS.slice(0, 2).concat(CONVS.slice(6, 7))) : pick(CONVS);
   if (l !== 1 && Math.random() < 0.3) {
     const n = ri(conv.range[0], conv.range[1]);
@@ -567,6 +637,31 @@ const genGeometrie: Generator = (l) => {
       q: `Un pătrat are latura de ${s} cm. Care este perimetrul lui, în cm?`,
       a: String(4 * s),
       expl: `P = 4 × latura = 4 × ${s} = ${4 * s} cm.`,
+    };
+  }
+  if (l === 0) {
+    const t = ri(1, 3);
+    if (t === 1) {
+      const L = ri(5, 30), lat = ri(3, L - 1);
+      return {
+        q: `Un dreptunghi are lungimea de ${L} cm și lățimea de ${lat} cm. Care este perimetrul lui, în cm?`,
+        a: String(2 * (L + lat)),
+        expl: `P = 2 × (L + l) = 2 × (${L} + ${lat}) = 2 × ${L + lat} = ${2 * (L + lat)} cm.`,
+      };
+    }
+    if (t === 2) {
+      const s = ri(3, 30);
+      return {
+        q: `Un pătrat are latura de ${s} cm. Care este perimetrul lui, în cm?`,
+        a: String(4 * s),
+        expl: `P = 4 × latura = 4 × ${s} = ${4 * s} cm.`,
+      };
+    }
+    const s = ri(4, 30);
+    return {
+      q: `Perimetrul unui pătrat este ${4 * s} cm. Cât măsoară latura lui, în cm?`,
+      a: String(s),
+      expl: `Latura = P : 4 = ${4 * s} : 4 = ${s} cm.`,
     };
   }
   if (l === 3) {
@@ -627,7 +722,7 @@ for (let i = 1; i <= 100; i++) {
 }
 
 const genRomane: Generator = (l) => {
-  const n = l === 1 ? ri(1, 20) : l === 3 ? pick(TRICKY_ROMAN) : ri(1, 100);
+  const n = l === 1 ? ri(1, 20) : l === 0 ? ri(1, 50) : l === 3 ? pick(TRICKY_ROMAN) : ri(1, 100);
   if (Math.random() < 0.5) {
     return {
       q: `Scrie cu cifre arabe numărul roman ${toRoman(n)}.`,
@@ -655,12 +750,17 @@ const genRotunjire: Generator = (l) => {
   if (v === 1) {
     const ord = l === 1
       ? { name: "zecilor", k: 10 }
+      : l === 0
+      ? pick([
+          { name: "zecilor", k: 10 },
+          { name: "sutelor", k: 100 },
+        ])
       : pick([
           { name: "zecilor", k: 10 },
           { name: "sutelor", k: 100 },
           { name: "miilor", k: 1000 },
         ]);
-    let n = l === 1 ? ri(23, 980) : ri(1234, 98765);
+    let n = l === 1 ? ri(23, 980) : l === 0 ? ri(100, 9990) : ri(1234, 98765);
     if (n % ord.k === 0) n += ri(1, ord.k - 1);
     const rounded = Math.round(n / ord.k) * ord.k;
     return {
@@ -669,7 +769,7 @@ const genRotunjire: Generator = (l) => {
       expl: `Ne uităm la cifra din dreapta ordinului ${ord.name}: dacă e 5 sau mai mare, rotunjim în sus. ${fmt(n)} ≈ ${fmt(rounded)}.`,
     };
   }
-  const hi = l === 1 ? 998 : 99998;
+  const hi = l === 1 ? 998 : l === 0 ? 9998 : 99998;
   if (v === 2) {
     const n = ri(99, hi);
     return {
@@ -721,6 +821,31 @@ const genProbleme: Generator = (l) => {
     };
   }
   if (l === 3) return makeMersInvers();
+  if (l === 0) {
+    const t = ri(1, 3);
+    if (t === 1) {
+      const a = ri(10, 50), k = ri(2, 5);
+      return {
+        q: `Într-o livadă sunt ${a} meri și de ${k} ori mai mulți pruni. Câți pomi sunt în total în livadă?`,
+        a: String(a + a * k),
+        expl: `Pruni: ${a} × ${k} = ${a * k}. Total: ${a} + ${a * k} = ${a + a * k} pomi.`,
+      };
+    }
+    if (t === 2) {
+      const n = ri(2, 6), p = ri(3, 9), a = n * p + ri(5, 40);
+      return {
+        q: `Maria are ${a} lei. Cumpără ${n} caiete, fiecare costând ${p} lei. Câți lei îi rămân?`,
+        a: String(a - n * p),
+        expl: `Caietele costă ${n} × ${p} = ${n * p} lei. Îi rămân ${a} − ${n * p} = ${a - n * p} lei.`,
+      };
+    }
+    const v1 = ri(10, 60), tt = ri(2, 5);
+    return {
+      q: `O mașină parcurge ${v1} km într-o oră. Câți km parcurge în ${tt} ore, mergând la fel de repede?`,
+      a: String(v1 * tt),
+      expl: `${v1} km × ${tt} = ${v1 * tt} km.`,
+    };
+  }
   const v = ri(1, 4);
   if (v === 1) {
     const a = ri(12, 60), k = ri(2, 5);
@@ -775,6 +900,7 @@ const TOPICS: Topic[] = [
 
 const LEVELS: LevelInfo[] = [
   { v: 1, name: "Încălzire", hint: "pentru început" },
+  { v: 0, name: "Clasa a III-a", hint: "recapitulare, numere până la 10.000" },
   { v: 2, name: "Clasa a IV-a", hint: "nivelul programei" },
   { v: 3, name: "Ca la examen", hint: "subiecte grele" },
 ];
@@ -881,7 +1007,7 @@ const loadProgress = async (): Promise<Progress> => {
       const res = await window.storage.get("mate-progres-v1");
       if (res && res.value) {
         const p = JSON.parse(res.value) as Progress;
-        if (!p.level) p.level = 2;
+        if (p.level == null) p.level = 2;
         if (!p.daily) p.daily = {}; // istoric vechi, fără contor pe zile
         return p;
       }
@@ -1725,7 +1851,7 @@ export default function MatePentruLazar() {
     });
   }, []);
 
-  const level: Level = progress.level || 2;
+  const level: Level = progress.level ?? 2;
   const setLevel = (v: Level) => updateProgress((p) => { p.level = v; return p; });
 
   const recordAnswer = (topicId: string, ok: boolean) => {
