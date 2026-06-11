@@ -1293,6 +1293,23 @@ button { font-family: inherit; }
   display: flex; justify-content: space-between; align-items: center;
 }
 
+.game-stage {
+  border: 2px solid var(--ink);
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--paper);
+  box-shadow: 2px 2px 0 rgba(33,56,92,.12);
+  -webkit-user-select: none; user-select: none;
+}
+.game-over {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: 4px;
+  background: rgba(251,248,240,.86);
+  font-family: "Patrick Hand", cursive; font-size: 21px; color: var(--red-pen);
+  padding: 12px;
+}
+
 .expl-box {
   margin-top: 10px;
   background: #FFF8DE;
@@ -1444,6 +1461,305 @@ const Mascot = ({ message, mood = "idle", small }: { message: string; mood?: Moo
 
 const mmss = (s: number): string =>
   `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
+
+/* ------------------------------------------------------------------ */
+/* Joc-recompensă — 5 minute de joc după misiunea zilei                */
+/* Două mini-jocuri pe canvas, fără fișiere externe (ca tot restul     */
+/* aplicației): Bufnița săritoare (gen „dinozaurul Google") și Sparge  */
+/* baloanele. Lumea fiecărui joc trăiește în ref-uri ca să nu reseteze */
+/* la fiecare render; bucla rulează pe requestAnimationFrame.          */
+/* ------------------------------------------------------------------ */
+
+interface GameProps {
+  running: boolean;
+  sound: boolean;
+}
+
+/** Bufnița Lazăr aleargă și sare peste obstacole. Atinge / Space ca să sari. */
+const OwlRunner = ({ running, sound }: GameProps) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [score, setScore] = useState(0);
+  const [best, setBest] = useState(0);
+  const [dead, setDead] = useState(false);
+
+  const W = 600, H = 200, GROUND = 168, OWL_X = 64, OWL_SZ = 34;
+  const OBST = ["🌵", "📚", "🪨", "🧱"];
+
+  const world = useRef({
+    owlY: 0,        // deplasare verticală față de sol (≤ 0 = în aer)
+    owlV: 0,
+    onGround: true,
+    obstacles: [] as { x: number; w: number; h: number; emoji: string }[],
+    speed: 240,
+    gap: 360,
+    score: 0,
+    alive: true,
+  });
+
+  const reset = useCallback(() => {
+    const w = world.current;
+    w.owlY = 0; w.owlV = 0; w.onGround = true; w.obstacles = [];
+    w.speed = 240; w.gap = 360; w.score = 0; w.alive = true;
+    setScore(0); setDead(false);
+  }, []);
+
+  const jump = useCallback(() => {
+    if (!running) return;
+    const w = world.current;
+    if (!w.alive) { reset(); return; }
+    if (w.onGround) { w.owlV = -640; w.onGround = false; if (sound) playHop(); }
+  }, [running, sound, reset]);
+
+  // Tastatură: Space / săgeată sus pentru cei care se joacă la laptop.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "Space" || e.code === "ArrowUp") { e.preventDefault(); jump(); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [jump]);
+
+  useEffect(() => {
+    const cv = canvasRef.current; if (!cv) return;
+    const ctx = cv.getContext("2d"); if (!ctx) return;
+    let raf = 0, last = performance.now();
+
+    const frame = (now: number) => {
+      let dt = (now - last) / 1000; last = now;
+      if (dt > 0.05) dt = 0.05; // fără salturi după ce revii în tab
+      const w = world.current;
+
+      if (running && w.alive) {
+        w.owlV += 1850 * dt;
+        w.owlY += w.owlV * dt;
+        if (w.owlY >= 0) { w.owlY = 0; w.owlV = 0; w.onGround = true; }
+
+        w.speed += 6 * dt;                 // se accelerează încet
+        const move = w.speed * dt;
+        w.score += move * 0.04;
+        for (const o of w.obstacles) o.x -= move;
+        w.obstacles = w.obstacles.filter((o) => o.x + o.w > -10);
+
+        w.gap -= move;
+        if (w.gap <= 0) {
+          const h = ri(26, 40);
+          w.obstacles.push({ x: W + 12, w: 24, h, emoji: pick(OBST) });
+          w.gap = ri(300, 480) - Math.min(120, w.speed - 240);
+        }
+
+        // coliziune AABB între bufniță și obstacole
+        const owlBottom = GROUND + w.owlY;
+        const owlTop = owlBottom - (OWL_SZ - 6);
+        const ox1 = OWL_X + 5, ox2 = OWL_X + OWL_SZ - 7;
+        for (const o of w.obstacles) {
+          const bx1 = o.x + 3, bx2 = o.x + o.w - 3, bTop = GROUND - o.h;
+          if (ox2 > bx1 && ox1 < bx2 && owlBottom > bTop && owlTop < GROUND) {
+            w.alive = false;
+            setDead(true);
+            setBest((b) => Math.max(b, Math.floor(w.score)));
+            if (sound) playWrong();
+          }
+        }
+        setScore(Math.floor(w.score));
+      }
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = "#FBF8F0"; ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = "#21385C"; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(0, GROUND + 2); ctx.lineTo(W, GROUND + 2); ctx.stroke();
+      ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+      for (const o of w.obstacles) { ctx.font = `${o.h}px serif`; ctx.fillText(o.emoji, o.x, GROUND); }
+      ctx.font = `${OWL_SZ}px serif`;
+      ctx.fillText("🦉", OWL_X, GROUND + w.owlY);
+
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [running, sound]);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+        <span className="hand" style={{ fontSize: 20, color: "var(--ink)" }}>Scor: {score}</span>
+        <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>Atinge ecranul ca să sari 🦉</span>
+      </div>
+      <div className="game-stage" onPointerDown={jump} style={{ position: "relative", cursor: "pointer" }}>
+        <canvas ref={canvasRef} width={W} height={H} style={{ width: "100%", display: "block", touchAction: "none" }} />
+        {dead && (
+          <div className="game-over">
+            Ai pierdut! Scor: {score}
+            {best > score ? ` · record: ${best}` : ""}
+            <br />Atinge pentru o nouă încercare 🔁
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/** Sparge baloanele cât plutesc în sus. Fiecare balon spart = un punct. */
+const BubblePop = ({ running, sound }: GameProps) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [score, setScore] = useState(0);
+
+  const W = 360, H = 480;
+  const COLORS = ["#FFD23F", "#2E8B57", "#D6402B", "#5A8DE0", "#E879C8"];
+
+  const world = useRef({
+    bubbles: [] as { x: number; y: number; r: number; vx: number; vy: number; color: string }[],
+    pops: [] as { x: number; y: number; r: number; life: number }[],
+    spawn: 0,
+    score: 0,
+  });
+
+  const onPointer = useCallback((e: { clientX: number; clientY: number }) => {
+    if (!running) return;
+    const cv = canvasRef.current; if (!cv) return;
+    const rect = cv.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) * (W / rect.width);
+    const cy = (e.clientY - rect.top) * (H / rect.height);
+    const w = world.current;
+    for (let i = w.bubbles.length - 1; i >= 0; i--) { // de sus în jos: balonul desenat ultimul
+      const b = w.bubbles[i];
+      const dx = b.x - cx, dy = b.y - cy;
+      if (dx * dx + dy * dy <= (b.r + 6) * (b.r + 6)) {
+        w.pops.push({ x: b.x, y: b.y, r: b.r, life: 1 });
+        w.bubbles.splice(i, 1);
+        w.score += 1; setScore(w.score);
+        if (sound) playPop();
+        break;
+      }
+    }
+  }, [running, sound]);
+
+  useEffect(() => {
+    const cv = canvasRef.current; if (!cv) return;
+    const ctx = cv.getContext("2d"); if (!ctx) return;
+    let raf = 0, last = performance.now();
+
+    const frame = (now: number) => {
+      let dt = (now - last) / 1000; last = now;
+      if (dt > 0.05) dt = 0.05;
+      const w = world.current;
+
+      if (running) {
+        w.spawn -= dt;
+        if (w.spawn <= 0 && w.bubbles.length < 13) {
+          const r = ri(20, 36);
+          w.bubbles.push({ x: ri(r, W - r), y: H + r, r, vx: ri(-26, 26), vy: ri(48, 96), color: pick(COLORS) });
+          w.spawn = 0.45 + Math.random() * 0.35;
+        }
+        for (const b of w.bubbles) {
+          b.y -= b.vy * dt;
+          b.x += b.vx * dt;
+          if (b.x < b.r || b.x > W - b.r) { b.vx = -b.vx; b.x = Math.max(b.r, Math.min(W - b.r, b.x)); }
+        }
+        w.bubbles = w.bubbles.filter((b) => b.y + b.r > -4);
+        for (const p of w.pops) { p.life -= dt * 3; p.r += dt * 80; }
+        w.pops = w.pops.filter((p) => p.life > 0);
+      }
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = "#FBF8F0"; ctx.fillRect(0, 0, W, H);
+      for (const b of w.bubbles) {
+        ctx.beginPath(); ctx.arc(b.x, b.y, b.r, 0, 6.2832);
+        ctx.fillStyle = b.color; ctx.globalAlpha = 0.82; ctx.fill(); ctx.globalAlpha = 1;
+        ctx.lineWidth = 2; ctx.strokeStyle = "rgba(33,56,92,.5)"; ctx.stroke();
+        ctx.beginPath(); ctx.arc(b.x - b.r * 0.32, b.y - b.r * 0.32, b.r * 0.2, 0, 6.2832);
+        ctx.fillStyle = "rgba(255,255,255,.75)"; ctx.fill();
+      }
+      for (const p of w.pops) {
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.2832);
+        ctx.strokeStyle = `rgba(214,64,43,${Math.max(0, p.life)})`; ctx.lineWidth = 3; ctx.stroke();
+      }
+
+      raf = requestAnimationFrame(frame);
+    };
+    raf = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(raf);
+  }, [running]);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+        <span className="hand" style={{ fontSize: 20, color: "var(--ink)" }}>Scor: {score}</span>
+        <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>Atinge baloanele ca să le spargi 🫧</span>
+      </div>
+      <div className="game-stage" style={{ maxWidth: 360, margin: "0 auto" }}>
+        <canvas
+          ref={canvasRef}
+          width={W}
+          height={H}
+          onPointerDown={onPointer}
+          style={{ width: "100%", display: "block", touchAction: "none", cursor: "pointer" }}
+        />
+      </div>
+    </div>
+  );
+};
+
+/** Ecranul de recompensă: alegi un joc și te distrezi GAME_SECONDS, apoi gata. */
+const JocReward = ({ sound, onExit }: { sound: boolean; onExit: () => void }) => {
+  const [game, setGame] = useState<"menu" | "owl" | "bubble">("menu");
+  const [left, setLeft] = useState(GAME_SECONDS);
+
+  useEffect(() => {
+    const id = setInterval(() => setLeft((s) => Math.max(0, s - 1)), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const over = left <= 0;
+
+  return (
+    <>
+      <div className="timer-strip">
+        <span className="display" style={{ fontWeight: 800, fontSize: 15 }}>🎮 Recompensă — 5 minute de joc</span>
+        <span
+          className="display"
+          style={{ fontWeight: 800, fontSize: 18, color: left < 60 ? "var(--red-pen)" : "var(--ink)" }}
+          aria-live="polite"
+        >
+          ⏱ {mmss(left)}
+        </span>
+      </div>
+
+      {over ? (
+        <div className="card" style={{ textAlign: "center", padding: 24, position: "relative", overflow: "hidden" }}>
+          <Confetti />
+          <Mascot message="Gata cu jocul pe azi! Te-ai descurcat de minune. Pe mâine! 🦉" mood="celebrate" />
+          <button className="btn" style={{ marginTop: 16 }} onClick={onExit}>Înapoi la capitole</button>
+        </div>
+      ) : game === "menu" ? (
+        <div className="card" style={{ padding: 18 }}>
+          <Mascot message="Ai dus misiunea la capăt — ai 5 minute de joc! Ce alegi?" mood="cheer" />
+          <div style={{ display: "grid", gap: 12, marginTop: 14 }}>
+            <button className="btn" style={{ fontSize: 18, padding: "16px 22px" }} onClick={() => setGame("owl")}>
+              🦉 Bufnița săritoare — sari peste obstacole
+            </button>
+            <button className="btn" style={{ fontSize: 18, padding: "16px 22px" }} onClick={() => setGame("bubble")}>
+              🫧 Sparge baloanele — atinge-le pe rând
+            </button>
+            <button className="btn ghost" onClick={onExit}>Sar peste joc, mă întorc la capitole</button>
+          </div>
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 16 }}>
+          <button
+            className="btn ghost"
+            style={{ fontSize: 14, padding: "6px 14px", marginBottom: 12 }}
+            onClick={() => setGame("menu")}
+          >
+            ← Schimbă jocul
+          </button>
+          {game === "owl"
+            ? <OwlRunner running={!over} sound={sound} />
+            : <BubblePop running={!over} sound={sound} />}
+        </div>
+      )}
+    </>
+  );
+};
 
 /* ------------------------------------------------------------------ */
 /* Statistici — tile, grafice SVG, calendar                            */
@@ -1968,11 +2284,14 @@ const QuestionCard = ({ topic, question, onAnswer, feedback, hideExpl }: Questio
 /* Aplicația                                                           */
 /* ------------------------------------------------------------------ */
 
-type Screen = "home" | "practice" | "quick" | "quickResult" | "varianta" | "variantaResult" | "stats";
+type Screen = "home" | "practice" | "quick" | "quickResult" | "varianta" | "variantaResult" | "stats" | "joc";
 
 const QUICK_QUESTIONS = 9;
 const QUICK_SECONDS = 20 * 60;
 const VARIANTA_SECONDS = 60 * 60;
+
+/** Recompensa misiunii zilei: cât durează sesiunea de joc. */
+const GAME_SECONDS = 5 * 60;
 
 /** Câte răspunsuri corecte „deblochează" un capitol pe harta drumului spre Lazăr. */
 const MASTERY_OK = 10;
@@ -2086,6 +2405,8 @@ const tone = (ctx: AudioContext, freq: number, start: number, dur: number, type:
 const playCorrect = (): void => { const c = audioCtx(); if (c) { tone(c, 660, 0, 0.12); tone(c, 990, 0.09, 0.16); } };
 const playWrong = (): void => { const c = audioCtx(); if (c) tone(c, 196, 0, 0.22, "triangle", 0.09); };
 const playFanfare = (): void => { const c = audioCtx(); if (c) [523, 659, 784, 1047].forEach((f, i) => tone(c, f, i * 0.1, 0.24, "triangle", 0.1)); };
+const playHop = (): void => { const c = audioCtx(); if (c) tone(c, 520, 0, 0.09, "square", 0.05); };
+const playPop = (): void => { const c = audioCtx(); if (c) tone(c, ri(460, 820), 0, 0.09, "sine", 0.08); };
 
 const vibrate = (pattern: number | number[]): void => {
   try { if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(pattern); } catch { /* fără vibrație */ }
@@ -2514,9 +2835,18 @@ export default function MatePentruLazar() {
                     </span>
                   </div>
                   {complete ? (
-                    <p className="hand" style={{ fontSize: 19, color: "var(--green-pen)", margin: 0, transform: "rotate(-1deg)" }}>
-                      Misiune îndeplinită! 🎉 +{QUEST_REWARD} ⭐
-                    </p>
+                    <>
+                      <p className="hand" style={{ fontSize: 19, color: "var(--green-pen)", margin: 0, transform: "rotate(-1deg)" }}>
+                        Misiune îndeplinită! 🎉 +{QUEST_REWARD} ⭐
+                      </p>
+                      <button
+                        className="btn"
+                        style={{ width: "100%", marginTop: 12, fontSize: 16, padding: "12px 22px" }}
+                        onClick={() => setScreen("joc")}
+                      >
+                        🎮 Joacă-te 5 minute — recompensa ta!
+                      </button>
+                    </>
                   ) : (
                     <>
                       <span className="bar"><div style={{ width: `${pct}%` }} /></span>
@@ -2872,6 +3202,11 @@ export default function MatePentruLazar() {
               <button className="btn ghost" onClick={() => setScreen("home")}>Înapoi la capitole</button>
             </div>
           </>
+        )}
+
+        {/* -------------------- JOC-RECOMPENSĂ (5 minute) -------------------- */}
+        {screen === "joc" && (
+          <JocReward sound={progress.sound} onExit={() => setScreen("home")} />
         )}
 
         {/* ----------------------------- STATISTICI ----------------------------- */}
