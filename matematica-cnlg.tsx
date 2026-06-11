@@ -1503,6 +1503,72 @@ const openInClaude = (prompt: string): void => {
 };
 
 /* ------------------------------------------------------------------ */
+/* Prompt pentru explicarea unui exercițiu greșit cu Claude             */
+/* ------------------------------------------------------------------ */
+
+interface ExercisePrompt {
+  /** Capitolul sau subiectul din care face parte exercițiul. */
+  topic?: string;
+  /** Enunțul exercițiului. */
+  q: string;
+  /** Răspunsul corect. */
+  correct: string;
+  /** Ce a scris elevul. `undefined` = nu îl includem în prompt. */
+  given?: string;
+  /** Rezolvarea pe scurt din caiet, dacă există. */
+  expl?: string | null;
+}
+
+/** Construiește un prompt în limba română prin care Claude îi explică
+ *  elevului, pas cu pas, un exercițiu pe care l-a greșit. */
+const buildExercisePrompt = (e: ExercisePrompt): string => {
+  const lines: string[] = [
+    "Ești un profesor de matematică prietenos și răbdător. Un elev de clasa a IV-a, care se pregătește pentru testul de admitere/departajare la Colegiul Național „Gheorghe Lazăr” din Sibiu, a greșit exercițiul de mai jos.",
+    "",
+    "Explică-i, pe înțelesul unui copil:",
+    "1. Ce îi cere exercițiul.",
+    "2. Cum se rezolvă, pas cu pas, fără să sari etape.",
+    "3. Care e probabil greșeala lui și cum o evită data viitoare.",
+    "4. O încurajare scurtă. Răspunde în limba română.",
+    "",
+    "=== EXERCIȚIUL ===",
+  ];
+  if (e.topic) lines.push(`Capitol: ${e.topic}`);
+  lines.push(`Enunț: ${e.q}`);
+  if (e.given !== undefined) {
+    lines.push(e.given.trim() ? `Răspunsul elevului (greșit): ${e.given}` : "Elevul nu a dat niciun răspuns.");
+  }
+  lines.push(`Răspunsul corect: ${e.correct}`);
+  if (e.expl) lines.push("", `Rezolvarea pe scurt (din caiet): ${e.expl}`);
+  return lines.join("\n");
+};
+
+/* ------------------------------------------------------------------ */
+/* Butoane „Întreabă-l pe Claude / Copiază promptul” pentru un exercițiu */
+/* ------------------------------------------------------------------ */
+
+const ExplainButtons = ({ prompt }: { prompt: string }) => {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard indisponibil — ignorăm în liniște */ }
+  };
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+      <button className="btn" style={{ fontSize: 13, padding: "6px 14px" }} onClick={() => openInClaude(prompt)}>
+        🤖 Cere-i lui Claude explicația
+      </button>
+      <button className="btn ghost" style={{ fontSize: 13, padding: "6px 14px" }} onClick={copy}>
+        {copied ? "✓ Copiat!" : "📋 Copiază promptul"}
+      </button>
+    </div>
+  );
+};
+
+/* ------------------------------------------------------------------ */
 /* Cardul de exercițiu (antrenament și simulare rapidă)                 */
 /* ------------------------------------------------------------------ */
 
@@ -1581,6 +1647,16 @@ const QuestionCard = ({ topic, question, onAnswer, feedback, hideExpl }: Questio
         <>
           <Verdict ok={feedback.ok} correct={question.a} />
           {!hideExpl && <div className="expl-box">💡 {question.expl}</div>}
+          {!hideExpl && !feedback.ok && (
+            <ExplainButtons
+              prompt={buildExercisePrompt({
+                topic: topic.name,
+                q: question.q,
+                correct: question.a,
+                expl: question.expl,
+              })}
+            />
+          )}
         </>
       )}
     </div>
@@ -2173,6 +2249,17 @@ export default function MatePentruLazar() {
                           : `✗ ${part.dat ? `ai scris ${part.dat}` : "fără răspuns"} · corect: ${part.a}`}
                       </div>
                       {!part.ok && part.expl && <div className="expl-box">💡 {part.expl}</div>}
+                      {!part.ok && part.expl && part.text && (
+                        <ExplainButtons
+                          prompt={buildExercisePrompt({
+                            topic: `Subiectul ${s.nr}`,
+                            q: part.inputLabel ? `${part.text} (se cere: ${part.inputLabel})` : part.text,
+                            correct: part.a,
+                            given: part.dat,
+                            expl: part.expl,
+                          })}
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
