@@ -4,17 +4,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A single-file React app: `matematica-cnlg.jsx`. It is a Romanian-language math
-practice app ("caietul meu de pregătire") for a 4th-grader preparing for the
-admission/departajare test at Colegiul Național Gheorghe Lazăr (CNGL), Sibiu.
-The default export is the `MatePentruLazar` component.
+A single-file React + TypeScript app: `matematica-cnlg.tsx`. It is a
+Romanian-language math practice app ("caietul meu de pregătire") for a 4th-grader
+preparing for the admission/departajare test at Colegiul Național Gheorghe Lazăr
+(CNGL), Sibiu. The default export is the `MatePentruLazar` component.
 
-There is **no build tooling** — no `package.json`, bundler, linter, or test
-setup. The file is meant to be dropped into a React host that provides `React`
-and an optional `window.storage` API (an artifact/sandbox-style environment).
-All persistence is best-effort and silently no-ops when `window.storage` is
-absent. To run it, paste/import the component into a React sandbox; there are no
-local build/lint/test commands to run.
+The component is bundled by **Vite** and ships as an installable **PWA** (offline
+support via a generated service worker). It is still authored as one self-contained
+file: `src/main.tsx` only wires up the React root and, in the browser, backs the
+optional `window.storage` host API with `localStorage`. All persistence is
+best-effort and silently no-ops when `window.storage` is absent.
+
+### Commands
+
+- `npm run dev` — Vite dev server (the PWA/service worker is disabled in dev).
+- `npm run build` — `tsc -b` typecheck + `vite build` (emits `dist/`, incl. the
+  service worker and `manifest.webmanifest`).
+- `npm run preview` — serve the production build locally (use this to exercise
+  the installable/offline PWA behaviour).
+- `npm run typecheck` — types only (`tsc -b --noEmit`).
+- `npm run icons` — regenerate the PWA icon set in `public/` from inline SVG
+  (`scripts/generate-icons.mjs`, needs `sharp`). The app's color palette is
+  duplicated there — keep it in sync with the CSS variables if colors change.
+
+The site is served from a project subpath (`base: "/exam/"` in `vite.config.ts`),
+so the manifest `scope`/`start_url` and all asset URLs are prefixed with `/exam/`.
+GitHub Actions (`.github/workflows/deploy.yml`) builds and deploys `dist/` to
+GitHub Pages.
+
+### Conventions for TypeScript
+
+Domain types live at the top of `matematica-cnlg.tsx`: `Question` (what every
+`genXxx`/`makeXxx` builder returns), `Topic`, the exam shapes (`ExamSubject`,
+`ExamPart`, `GradedSubject`, `ExamResult`), and `Progress`. When adding a topic
+or exam-item builder, type it against these (generators are typed `Generator =
+(l: Level) => Question`) rather than introducing ad-hoc shapes. `window.storage`
+is typed in `src/vite-env.d.ts`.
 
 **All user-facing strings are Romanian.** Keep new copy in Romanian and match
 the existing diacritics and tone (`var(--ink)`, handwritten "caiet" styling).
