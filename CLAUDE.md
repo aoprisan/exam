@@ -70,6 +70,27 @@ the existing diacritics and tone (`var(--ink)`, handwritten "caiet" styling).
    a generator and one `TOPICS` entry; everything else (home grid, quick sim,
    progress tracking) is driven off this array.
 
+4b. **Calcul în coloană** — a second, self-contained registry `COLUMN_OPS`
+   (4 entries, `ColumnOp extends Topic`) for the four operations on 3–4 digit
+   numbers, each with a **step-by-step tutorial**. Deliberately *not* part of
+   `TOPICS`: it has its own screens (`calcul` hub → `tutorial`), stays out of
+   the journey map and the quick sim, but reuses the practice screen and records
+   progress under its own `perTopic` ids (`col-adun`, `col-scad`, `col-inm`,
+   `col-imp`).
+
+   The tutorials are generated, not hard-coded: `planAdunare`, `planScadere`,
+   `planInmultire` and `planImpartire` return a `Tutorial` — a list of
+   `TutStep`s, each holding the Romanian explanation plus a full snapshot of the
+   worked "notebook page" (`TutRow[]`: cells placed on numbered columns, with
+   `hi`/`res`/`dim` colouring, small rows for carries and borrows, and the line
+   ranges). `TutBoard`/`TutorialView` only render those snapshots, so the math
+   lives entirely in the planners. Every op's `tutorial()` draws a fresh example
+   ("Alt exemplu"), and the same planners produce the `expl` of the practice
+   questions (`explFromSteps`, one step per line — `.expl-box` is `pre-line`).
+   Levels shift the difficulty inside 3–4 digits: level 1 has no carries or
+   borrows, level 0 is 3 digits, levels 2–3 are 4 digits and add 2-digit
+   multipliers, division with a remainder and 2-digit divisors.
+
 5. **Storage** — `emptyProgress`, `loadProgress`, `saveProgress` against
    `window.storage` under key `mate-progres-v1`. Progress shape:
    `{ perTopic: { [id]: {ok,total} }, stars, examHistory: [...],
@@ -98,8 +119,10 @@ the existing diacritics and tone (`var(--ink)`, handwritten "caiet" styling).
    and quick-sim screens; `hideExpl` suppresses the explanation box).
 
 8. **Main component `MatePentruLazar`** — a screen state machine via the
-   `screen` state: `home → practice | quick | varianta`, each with its result
-   screen (`quickResult`, `variantaResult`). Three modes:
+   `screen` state: `home → practice | quick | varianta | calcul → tutorial`,
+   each with its result screen (`quickResult`, `variantaResult`). `practiceBack`
+   remembers which screen opened the practice, so "← Înapoi" returns to `calcul`
+   for a column-arithmetic chapter and to `home` otherwise. Three modes:
    - **Antrenament**: endless single-topic practice at the chosen level.
    - **Simulare rapidă**: `QUICK_QUESTIONS` (9) random topics, `QUICK_SECONDS`
      (20 min) timer.
