@@ -921,6 +921,490 @@ const LEVELS: LevelInfo[] = [
 ];
 
 /* ------------------------------------------------------------------ */
+/* Calcul în coloană — adunare, scădere, înmulțire și împărțire cu      */
+/* numere de 3 și 4 cifre, cu tutoriale pas cu pas                      */
+/* ------------------------------------------------------------------ */
+
+/** Numele ordinelor, de la unități spre stânga. */
+const ORDINE = ["unități", "zeci", "sute", "mii", "zeci de mii", "sute de mii", "milioane"];
+
+const ordin = (k: number): string => ORDINE[k] || `ordinul ${k + 1}`;
+const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** Culoarea unei căsuțe: roșu (ce lucrăm acum), verde (rezultat), tăiat (înlocuit). */
+type CellKind = "hi" | "res" | "dim";
+
+/** O căsuță din tabla de calcul. */
+interface TutCell { ch: string; kind?: CellKind }
+
+/** Un rând din tabla de calcul; coloana 0 este cea mai din stânga. */
+interface TutRow {
+  /** Semnul scris în stânga rândului („+”, „−”, „×”). */
+  sign?: string;
+  cells: (TutCell | null)[];
+  /** Intervalul de coloane [de la, până la] sub care se trage linia. */
+  line?: [number, number];
+  /** Rând mic, pentru cifrele ținute minte sau pentru împrumuturi. */
+  small?: boolean;
+}
+
+/** Un pas din tutorial: explicația și cum arată tabla după acel pas. */
+interface TutStep {
+  text: string;
+  rows: TutRow[];
+  /** Câtul scris până acum — doar la împărțire. */
+  quot?: string;
+}
+
+interface Tutorial {
+  /** „col” = calcul în coloană, „div” = împărțire cu bară. */
+  kind: "col" | "div";
+  titlu: string;
+  intro: string;
+  steps: TutStep[];
+  /** Regulile de reținut, afișate sub tablă. */
+  reguli: string[];
+  /** Împărțitorul, scris în dreapta barei (doar la „div”). */
+  divisor?: string;
+}
+
+const digitsOf = (n: number): string[] => String(n).split("");
+
+/** Cifrele lui `s` așezate pe `w` coloane, ultima cifră ajungând în coloana `end`. */
+const cellsAt = (s: string, w: number, end: number, kind?: CellKind): (TutCell | null)[] => {
+  const out: (TutCell | null)[] = Array(w).fill(null);
+  s.split("").forEach((ch, i) => {
+    const c = end - s.length + 1 + i;
+    if (c >= 0 && c < w) out[c] = { ch, kind };
+  });
+  return out;
+};
+
+/** Copie a rândurilor, ca fiecare pas să-și păstreze propria imagine a tablei. */
+const snapshot = (rows: TutRow[]): TutRow[] =>
+  rows.map((r) => ({ ...r, cells: r.cells.map((c) => (c ? { ...c } : null)) }));
+
+/** Explicația scurtă a unui exercițiu: pașii tutorialului, fără așezarea în pagină. */
+const explFromSteps = (t: Tutorial): string => t.steps.slice(1).map((s) => s.text).join("\n");
+
+/* ---------------- adunare ---------------- */
+
+const planAdunare = (a: number, b: number): Tutorial => {
+  const da = digitsOf(a), db = digitsOf(b);
+  const n = Math.max(da.length, db.length);
+  const w = n + 1; // o coloană în plus pentru eventualul 1 ținut minte la final
+  const carryRow: TutRow = { cells: Array(w).fill(null), small: true };
+  const rowA: TutRow = { cells: cellsAt(String(a), w, w - 1) };
+  const rowB: TutRow = { sign: "+", cells: cellsAt(String(b), w, w - 1), line: [0, w - 1] };
+  const rowR: TutRow = { cells: Array(w).fill(null) };
+  const rows = [carryRow, rowA, rowB, rowR];
+  const steps: TutStep[] = [{
+    text: "Scriem numerele unul sub altul, cifră sub cifră: unitățile sub unități, zecile sub zeci, sutele sub sute. Tragem linia și pornim de la dreapta, de la unități.",
+    rows: snapshot(rows),
+  }];
+  let carry = 0;
+  for (let k = 0; k < n; k++) {
+    const col = w - 1 - k;
+    const x = Number(da[da.length - 1 - k] ?? 0);
+    const y = Number(db[db.length - 1 - k] ?? 0);
+    const s = x + y + carry;
+    const calcul = carry ? `${x} + ${y} + ${carry} (ținut minte) = ${s}` : `${x} + ${y} = ${s}`;
+    rowR.cells[col] = { ch: String(s % 10), kind: "res" };
+    carry = s > 9 ? 1 : 0;
+    if (carry) carryRow.cells[col - 1] = { ch: "1", kind: "hi" };
+    steps.push({
+      text: carry
+        ? `${cap(ordin(k))}: ${calcul}. Scriem ${s % 10} la ${ordin(k)} și ținem 1 minte pentru ${ordin(k + 1)}.`
+        : `${cap(ordin(k))}: ${calcul}. Scriem ${s}.`,
+      rows: snapshot(rows),
+    });
+  }
+  if (carry) {
+    rowR.cells[w - 1 - n] = { ch: "1", kind: "res" };
+    steps.push({
+      text: `A mai rămas 1 ținut minte de la ${ordin(n - 1)} — îl scriem în față, la ${ordin(n)}.`,
+      rows: snapshot(rows),
+    });
+  }
+  steps.push({ text: `Gata! ${fmt(a)} + ${fmt(b)} = ${fmt(a + b)}.`, rows: snapshot(rows) });
+  return {
+    kind: "col",
+    titlu: "Adunarea în coloană",
+    intro: `Exemplul nostru: ${fmt(a)} + ${fmt(b)}`,
+    steps,
+    reguli: [
+      "Aliniem numerele la dreapta: unitățile sub unități, zecile sub zeci, sutele sub sute, miile sub mii.",
+      "Adunăm ordin cu ordin, mereu de la dreapta la stânga.",
+      "Dacă suma unui ordin trece de 9, scriem doar cifra unităților ei și ținem 1 minte pentru ordinul următor.",
+      "Verificăm prin scădere: suma − un termen trebuie să dea celălalt termen.",
+    ],
+  };
+};
+
+/* ---------------- scădere ---------------- */
+
+const planScadere = (a: number, b: number): Tutorial => {
+  const w = String(a).length;
+  const da = digitsOf(a).map(Number);
+  const db = digitsOf(b).map(Number);
+  const top = [...da]; // valorile de sus, actualizate după fiecare împrumut
+  const adjRow: TutRow = { cells: Array(w).fill(null), small: true };
+  const rowA: TutRow = { cells: cellsAt(String(a), w, w - 1) };
+  const rowB: TutRow = { sign: "−", cells: cellsAt(String(b), w, w - 1), line: [0, w - 1] };
+  const rowR: TutRow = { cells: Array(w).fill(null) };
+  const rows = [adjRow, rowA, rowB, rowR];
+  const steps: TutStep[] = [{
+    text: `Scriem descăzutul (${fmt(a)}) sus și scăzătorul (${fmt(b)}) dedesubt, cifră sub cifră. Tragem linia și scădem de la dreapta la stânga.`,
+    rows: snapshot(rows),
+  }];
+  for (let k = 0; k < w; k++) {
+    const col = w - 1 - k;
+    const y = db[db.length - 1 - k] ?? 0;
+    let text: string;
+    if (top[col] >= y) {
+      text = `${cap(ordin(k))}: ${top[col]} − ${y} = ${top[col] - y}.`;
+    } else {
+      // împrumutăm de la primul vecin din stânga care are de unde
+      let j = col - 1;
+      let zerouri = 0;
+      while (j > 0 && top[j] === 0) {
+        top[j] = 9;
+        adjRow.cells[j] = { ch: "9", kind: "hi" };
+        if (rowA.cells[j]) rowA.cells[j]!.kind = "dim";
+        zerouri += 1;
+        j -= 1;
+      }
+      const vechi = top[j];
+      top[j] = vechi - 1;
+      adjRow.cells[j] = { ch: String(vechi - 1), kind: "hi" };
+      if (rowA.cells[j]) rowA.cells[j]!.kind = "dim";
+      const inainte = top[col];
+      top[col] = inainte + 10;
+      adjRow.cells[col] = { ch: String(top[col]), kind: "hi" };
+      if (rowA.cells[col]) rowA.cells[col]!.kind = "dim";
+      const lant = zerouri
+        ? ` Vecinul de alături era 0, așa că am mers mai departe spre stânga: fiecare 0 devine 9.`
+        : "";
+      text = `${cap(ordin(k))}: ${inainte} − ${y} nu se poate. Împrumutăm o unitate de la ${ordin(k + (col - j))}: ${vechi} devine ${vechi - 1}, iar la ${ordin(k)} avem acum ${top[col]}.${lant} Deci ${top[col]} − ${y} = ${top[col] - y}.`;
+    }
+    rowR.cells[col] = { ch: String(top[col] - y), kind: "res" };
+    steps.push({ text, rows: snapshot(rows) });
+  }
+  // rezultatul nu se scrie cu zerouri în față
+  for (let c = 0; c < w - 1; c += 1) {
+    if (rowR.cells[c]?.ch === "0") rowR.cells[c] = null; else break;
+  }
+  steps.push({
+    text: `Gata! ${fmt(a)} − ${fmt(b)} = ${fmt(a - b)}. Verificăm prin adunare: ${fmt(a - b)} + ${fmt(b)} = ${fmt(a)}.`,
+    rows: snapshot(rows),
+  });
+  return {
+    kind: "col",
+    titlu: "Scăderea în coloană",
+    intro: `Exemplul nostru: ${fmt(a)} − ${fmt(b)}`,
+    steps,
+    reguli: [
+      "Descăzutul (numărul mai mare) se scrie sus, scăzătorul dedesubt, cifră sub cifră.",
+      "Scădem ordin cu ordin, de la dreapta la stânga.",
+      "Când cifra de sus e prea mică, împrumutăm o unitate de la vecinul din stânga: el scade cu 1, iar cifra noastră crește cu 10.",
+      "Dacă vecinul este 0, împrumutăm mai departe spre stânga, iar zerourile din drum devin 9.",
+      "Verificăm prin adunare: rezultatul + scăzătorul = descăzutul.",
+    ],
+  };
+};
+
+/* ---------------- înmulțire ---------------- */
+
+const planInmultire = (a: number, b: number): Tutorial => {
+  const da = digitsOf(a), db = digitsOf(b);
+  const na = da.length, nb = db.length;
+  const w = na + nb;
+  const carryRow: TutRow = { cells: Array(w).fill(null), small: true };
+  const rowA: TutRow = { cells: cellsAt(String(a), w, w - 1) };
+  const rowB: TutRow = { sign: "×", cells: cellsAt(String(b), w, w - 1), line: [0, w - 1] };
+  const partRows: TutRow[] = db.map(() => ({ cells: Array(w).fill(null) }));
+  const totalRow: TutRow = { cells: Array(w).fill(null) };
+  const rows: TutRow[] = [carryRow, rowA, rowB, ...partRows];
+  if (nb > 1) { partRows[nb - 1].sign = "+"; rows.push(totalRow); }
+  const steps: TutStep[] = [{
+    text: nb > 1
+      ? `Scriem numerele unul sub altul, aliniate la dreapta. Îl înmulțim pe ${fmt(a)} pe rând cu fiecare cifră a lui ${fmt(b)}, începând cu unitățile, și obținem produse parțiale pe care le adunăm la final.`
+      : `Scriem numerele unul sub altul, aliniate la dreapta. Îl înmulțim pe ${fmt(a)} cu ${fmt(b)}, cifră cu cifră, de la dreapta la stânga.`,
+    rows: snapshot(rows),
+  }];
+  const partiale: number[] = [];
+  for (let k = 0; k < nb; k++) {
+    const bd = Number(db[nb - 1 - k]);
+    const end = w - 1 - k;
+    const part = partRows[k];
+    partiale.push(a * bd * Math.pow(10, k));
+    carryRow.cells = Array(w).fill(null); // cifrele ținute minte se șterg la fiecare produs parțial
+    if (k > 0) {
+      steps.push({
+        text: `Trecem la următoarea cifră a lui ${fmt(b)}: ${bd}. Fiind cifra ${ordin(k)}lor, produsul se scrie deplasat cu ${k === 1 ? "o căsuță" : `${k} căsuțe`} spre stânga — locul unităților rămâne liber.`,
+        rows: snapshot(rows),
+      });
+    }
+    if (bd === 0) {
+      part.cells[end] = { ch: "0", kind: "res" };
+      steps.push({ text: `Cifra este 0, deci tot produsul parțial este 0.`, rows: snapshot(rows) });
+      continue;
+    }
+    let carry = 0;
+    for (let i = 0; i < na; i++) {
+      const ad = Number(da[na - 1 - i]);
+      const p = ad * bd + carry;
+      const tinut = carry;
+      part.cells[end - i] = { ch: String(p % 10), kind: "res" };
+      carry = Math.floor(p / 10);
+      if (carry) carryRow.cells[w - 2 - i] = { ch: String(carry), kind: "hi" };
+      steps.push({
+        text: `${bd} × ${ad} = ${ad * bd}${tinut ? `, plus ${tinut} ținut minte = ${p}` : ""}. Scriem ${p % 10}${carry ? ` și ținem ${carry} minte` : ""}.`,
+        rows: snapshot(rows),
+      });
+    }
+    if (carry) part.cells[end - na] = { ch: String(carry), kind: "res" };
+    steps.push({
+      text: `${carry ? `A mai rămas ${carry} ținut minte — îl scriem în față. ` : ""}${k === 0 ? "Primul produs parțial" : "Al doilea produs parțial"}: ${fmt(a)} × ${bd} = ${fmt(a * bd)}${k > 0 ? `, scris deplasat, adică ${fmt(a * bd * Math.pow(10, k))}` : ""}.`,
+      rows: snapshot(rows),
+    });
+  }
+  if (nb > 1) {
+    partRows[nb - 1].line = [0, w - 1];
+    totalRow.cells = cellsAt(String(a * b), w, w - 1, "res");
+    steps.push({
+      text: `Adunăm produsele parțiale: ${partiale.map(fmt).join(" + ")} = ${fmt(a * b)}.`,
+      rows: snapshot(rows),
+    });
+  }
+  steps.push({ text: `Gata! ${fmt(a)} × ${fmt(b)} = ${fmt(a * b)}.`, rows: snapshot(rows) });
+  return {
+    kind: "col",
+    titlu: "Înmulțirea în coloană",
+    intro: `Exemplul nostru: ${fmt(a)} × ${fmt(b)}`,
+    steps,
+    reguli: [
+      "Înmulțim de la dreapta la stânga, cu fiecare cifră a celui de-al doilea număr.",
+      "Cifra ținută minte se adună la produsul următor, nu la cel de acum.",
+      "Când înmulțim cu zecile, produsul parțial se scrie deplasat cu o căsuță spre stânga (locul unităților rămâne liber).",
+      "La final adunăm produsele parțiale, în coloană.",
+    ],
+  };
+};
+
+/* ---------------- împărțire ---------------- */
+
+const planImpartire = (a: number, d: number): Tutorial => {
+  const ds = digitsOf(a);
+  const w = ds.length;
+  const rowD: TutRow = { cells: ds.map((ch) => ({ ch })) };
+  const rows: TutRow[] = [rowD];
+  const steps: TutStep[] = [{
+    text: `Scriem deîmpărțitul ${fmt(a)}, o bară verticală și împărțitorul ${d}. Câtul se scrie sub împărțitor, iar noi lucrăm de la stânga la dreapta.`,
+    rows: snapshot(rows), quot: "",
+  }];
+  // prima „bucată”: luăm cifre din stânga până obținem un număr cel puțin egal cu împărțitorul
+  let i = 0, cur = 0, luate = 0;
+  while (i < w && cur < d) { cur = cur * 10 + Number(ds[i]); i += 1; luate += 1; }
+  let text = luate > 1
+    ? `Prima cifră este ${ds[0]}, dar ${ds[0]} : ${d} nu se poate (${ds[0]} < ${d}). Luăm primele ${luate} cifre: ${cur}.`
+    : `Începem cu prima cifră: ${cur}.`;
+  let quot = "";
+  let restRow: TutRow | null = null;
+  for (;;) {
+    const qd = Math.floor(cur / d);
+    const rest = cur % d;
+    quot += String(qd);
+    if (qd > 0) {
+      const sub = qd * d;
+      const j = i - 1;
+      const from = Math.max(0, j - Math.max(String(sub).length, String(cur).length) + 1);
+      rows.push({ sign: "−", cells: cellsAt(String(sub), w, j, "hi"), line: [from, j] });
+      restRow = { cells: cellsAt(String(rest), w, j, "res") };
+      rows.push(restRow);
+      text += ` ${cur} : ${d} = ${qd}${rest ? ` rest ${rest}` : ""} — scriem ${qd} la cât. Înmulțim: ${qd} × ${d} = ${sub}. Scădem: ${cur} − ${sub} = ${rest}.`;
+    } else {
+      text += ` ${cur} : ${d} = 0, pentru că ${cur} < ${d} — scriem 0 la cât.`;
+    }
+    steps.push({ text: text.trim(), rows: snapshot(rows), quot });
+    if (i >= w) break;
+    const next = ds[i];
+    if (restRow) restRow.cells[i] = { ch: next, kind: "hi" };
+    cur = rest * 10 + Number(next);
+    i += 1;
+    text = `Coborâm cifra următoare, ${next} — acum avem ${cur}.`;
+  }
+  const catv = Math.floor(a / d), rest = a % d;
+  steps.push({
+    text: rest === 0
+      ? `Nu mai avem cifre de coborât și restul este 0: împărțirea este exactă. ${fmt(a)} : ${d} = ${fmt(catv)}. Verificăm: ${fmt(catv)} × ${d} = ${fmt(a)}.`
+      : `Nu mai avem cifre de coborât, deci restul este ${rest}. ${fmt(a)} : ${d} = ${fmt(catv)} rest ${rest}. Verificăm: ${fmt(catv)} × ${d} + ${rest} = ${fmt(a)}.`,
+    rows: snapshot(rows), quot,
+  });
+  return {
+    kind: "div",
+    titlu: "Împărțirea cu bară",
+    intro: `Exemplul nostru: ${fmt(a)} : ${d}`,
+    steps,
+    reguli: [
+      "Lucrăm de la stânga la dreapta: luăm din deîmpărțit atâtea cifre cât ne trebuie ca să obținem un număr cel puțin egal cu împărțitorul.",
+      "La fiecare pas facem aceleași patru mișcări: împărțim, înmulțim, scădem, coborâm cifra următoare.",
+      "Dacă numărul format este mai mic decât împărțitorul, scriem 0 la cât și coborâm cifra următoare.",
+      "Restul este mereu mai mic decât împărțitorul.",
+      "Verificăm: cât × împărțitor + rest = deîmpărțit.",
+    ],
+    divisor: String(d),
+  };
+};
+
+/* ---------------- exerciții pentru cele patru operații ---------------- */
+
+/** Nivelurile de început lucrează cu 3 cifre, celelalte cu 4. */
+const cifre34 = (l: Level): number => (l === 1 || l === 0 ? 3 : 4);
+
+/** Un număr de `n` cifre (prima cifră niciodată 0). */
+const numDe = (n: number): number => (n === 3 ? ri(102, 999) : ri(1023, 9999));
+
+/** Există cel puțin o trecere peste ordin la a + b? */
+const hasCarry = (a: number, b: number): boolean => {
+  let x = a, y = b;
+  while (x > 0 || y > 0) {
+    if ((x % 10) + (y % 10) > 9) return true;
+    x = Math.floor(x / 10); y = Math.floor(y / 10);
+  }
+  return false;
+};
+
+/** Doi termeni de `n` cifre; `carry` cere cel puțin o trecere peste ordin. */
+const parAdunare = (n: number, carry: boolean): [number, number] => {
+  if (!carry) {
+    // fiecare coloană se adună fără trecere peste ordin
+    const da: number[] = [], db: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const min = i === 0 ? 1 : 0;
+      const x = ri(min, 9 - min);
+      da.push(x); db.push(ri(min, 9 - x));
+    }
+    return [Number(da.join("")), Number(db.join(""))];
+  }
+  let a = numDe(n), b = numDe(n);
+  while (!hasCarry(a, b)) { a = numDe(n); b = numDe(n); }
+  return [a, b];
+};
+
+/** Descăzut și scăzător de `n` cifre; `borrow` cere cel puțin un împrumut. */
+const parScadere = (n: number, borrow: boolean): [number, number] => {
+  for (;;) {
+    const da: number[] = [], db: number[] = [];
+    // prima cifră a descăzutului e mereu mai mare — rezultatul are tot n cifre
+    const p = ri(3, 9);
+    da.push(p); db.push(ri(1, p - 1));
+    for (let i = 1; i < n; i++) {
+      const x = ri(0, 9);
+      da.push(x);
+      db.push(borrow ? ri(0, 9) : ri(0, x));
+    }
+    const areImprumut = da.some((x, i) => i > 0 && x < db[i]);
+    if (areImprumut === borrow) return [Number(da.join("")), Number(db.join(""))];
+  }
+};
+
+/** Înmulțitor fără cifra 0, ca produsele parțiale să fie limpezi. */
+const inmultitor = (cifre: number): number => (cifre === 1 ? ri(3, 9) : ri(2, 9) * 10 + ri(2, 9));
+
+/** Deîmpărțit de `n` cifre, împărțitor `d` și restul cerut. Cu `fara0`,
+ *  câtul nu are cifre de 0 — util pentru exemplul din tutorial. */
+const parImpartire = (n: number, d: number, rest: number, fara0 = false): [number, number] => {
+  const lo = n === 3 ? 102 : 1023, hi = n === 3 ? 999 : 9999;
+  const min = Math.max(2, Math.ceil((lo - rest) / d)), max = Math.floor((hi - rest) / d);
+  let cat = ri(min, max);
+  if (fara0) {
+    for (let t = 0; t < 80 && String(cat).includes("0"); t++) cat = ri(min, max);
+  }
+  return [cat * d + rest, d];
+};
+
+const genColAdunare: Generator = (l) => {
+  const [a, b] = parAdunare(cifre34(l), l !== 1);
+  return {
+    q: `${fmt(a)} + ${fmt(b)} =`,
+    a: String(a + b),
+    expl: explFromSteps(planAdunare(a, b)),
+  };
+};
+
+const genColScadere: Generator = (l) => {
+  const [a, b] = parScadere(cifre34(l), l !== 1);
+  return {
+    q: `${fmt(a)} − ${fmt(b)} =`,
+    a: String(a - b),
+    expl: explFromSteps(planScadere(a, b)),
+  };
+};
+
+const genColInmultire: Generator = (l) => {
+  const n = cifre34(l);
+  const a = numDe(n);
+  // la examen se cer și înmulțiri cu numere de două cifre
+  const b = inmultitor(l === 3 ? 2 : l === 2 && Math.random() < 0.5 ? 2 : 1);
+  return {
+    q: `${fmt(a)} × ${fmt(b)} =`,
+    a: String(a * b),
+    expl: explFromSteps(planInmultire(a, b)),
+  };
+};
+
+const genColImpartire: Generator = (l) => {
+  const n = cifre34(l);
+  const d = l === 3 && Math.random() < 0.3 ? ri(12, 29) : ri(3, 9);
+  const cuRest = (l === 2 || l === 3) && Math.random() < 0.4;
+  const [a] = parImpartire(n, d, cuRest ? ri(1, d - 1) : 0);
+  const cat = Math.floor(a / d), rest = a % d;
+  const expl = explFromSteps(planImpartire(a, d));
+  if (!rest) return { q: `${fmt(a)} : ${d} =`, a: String(cat), expl };
+  if (Math.random() < 0.5) {
+    return { q: `Care este câtul împărțirii ${fmt(a)} : ${d}?`, a: String(cat), expl };
+  }
+  return { q: `Care este restul împărțirii ${fmt(a)} : ${d}?`, a: String(rest), expl };
+};
+
+/** O operație din secțiunea „Calcul în coloană”: capitol de antrenament + tutorial. */
+interface ColumnOp extends Topic {
+  /** Tutorialul pas cu pas, cu un exemplu nou la fiecare deschidere. */
+  tutorial: () => Tutorial;
+}
+
+const COLUMN_OPS: ColumnOp[] = [
+  {
+    id: "col-adun", icon: "➕", name: "Adunare în coloană", sub: "numere de 3 și 4 cifre, cu trecere peste ordin",
+    gen: genColAdunare,
+    tutorial: () => { const [a, b] = parAdunare(4, true); return planAdunare(a, b); },
+  },
+  {
+    id: "col-scad", icon: "➖", name: "Scădere în coloană", sub: "numere de 3 și 4 cifre, cu împrumut",
+    gen: genColScadere,
+    tutorial: () => { const [a, b] = parScadere(4, true); return planScadere(a, b); },
+  },
+  {
+    id: "col-inm", icon: "✖️", name: "Înmulțire în coloană", sub: "cu o cifră și cu două cifre",
+    gen: genColInmultire,
+    tutorial: () => planInmultire(numDe(3), inmultitor(2)),
+  },
+  {
+    id: "col-imp", icon: "➗", name: "Împărțire cu bară", sub: "cu o cifră, exactă sau cu rest",
+    gen: genColImpartire,
+    tutorial: () => {
+      const d = ri(3, 9);
+      const [a] = parImpartire(4, d, Math.random() < 0.4 ? ri(1, d - 1) : 0, true);
+      return planImpartire(a, d);
+    },
+  },
+];
+
+/** Tutorialul unui capitol de calcul în coloană, dacă există. */
+const columnOpOf = (id: string): ColumnOp | undefined => COLUMN_OPS.find((o) => o.id === id);
+
+/* ------------------------------------------------------------------ */
 /* Varianta tip examen — structura reală a testului CNGL din 2025       */
 /* 6 subiecte, 60 de minute, 100 p (10 din oficiu)                      */
 /* ------------------------------------------------------------------ */
@@ -1327,6 +1811,7 @@ button { font-family: inherit; }
   padding: 10px 12px;
   font-size: 15px;
   line-height: 1.5;
+  white-space: pre-line;
 }
 
 /* ----- Statistici ----- */
@@ -1392,6 +1877,47 @@ button { font-family: inherit; }
 .cal-cell .exam-mark {
   position: absolute; top: 2px; right: 4px; font-size: 9px;
 }
+
+/* ----- Calcul în coloană: tabla pas cu pas ----- */
+.tut-wrap { overflow-x: auto; padding: 4px 0 6px; }
+.tut-board { display: inline-block; font-family: "Baloo 2", system-ui, sans-serif; font-weight: 700; }
+.tut-row { display: flex; align-items: flex-end; }
+.tut-sign { width: 26px; flex: none; text-align: center; font-size: 22px; line-height: 38px; color: var(--ink); }
+.tut-cell {
+  width: 32px; height: 38px; flex: none;
+  display: grid; place-items: center;
+  font-size: 24px; line-height: 1; color: var(--ink);
+}
+.tut-cell.line { border-bottom: 3px solid var(--ink); }
+.tut-cell.hi { color: var(--red-pen); }
+.tut-cell.res { color: var(--green-pen); }
+.tut-cell.dim { color: var(--ink-soft); opacity: .5; text-decoration: line-through; }
+.tut-row.sm .tut-cell { height: 20px; font-size: 13px; color: var(--red-pen); }
+.tut-row.sm .tut-sign { line-height: 20px; }
+
+.tut-div { display: flex; align-items: stretch; }
+.tut-bar { width: 3px; flex: none; background: var(--ink); margin: 0 12px 0 4px; }
+.tut-quot { font-family: "Baloo 2", system-ui, sans-serif; font-weight: 700; }
+.tut-quot .dv { font-size: 24px; letter-spacing: 3px; line-height: 38px; white-space: nowrap; }
+.tut-quot .dv.q { color: var(--green-pen); }
+.tut-qline { border-top: 3px solid var(--ink); }
+
+.tut-step {
+  margin-top: 10px; background: #FFF8DE;
+  border: 1.5px dashed var(--ink-soft); border-radius: 10px; padding: 10px 12px;
+}
+.tut-no {
+  font-family: "Baloo 2", system-ui, sans-serif; font-weight: 800;
+  font-size: 12px; color: var(--red-pen); text-transform: uppercase; letter-spacing: .6px;
+}
+.tut-progress { height: 7px; border-radius: 6px; background: #E8E3D6; overflow: hidden; margin-top: 12px; }
+.tut-progress > div { height: 100%; background: var(--highlight); border-radius: 6px; }
+.tut-rules { margin: 0; padding-left: 20px; font-size: 14.5px; line-height: 1.55; }
+.tut-rules li { margin-bottom: 5px; }
+
+.op-card { margin-bottom: 12px; padding: 14px; }
+.op-head { display: flex; align-items: center; gap: 10px; }
+.op-ic { font-size: 26px; line-height: 1; flex: none; }
 `;
 
 /* ------------------------------------------------------------------ */
@@ -2290,10 +2816,138 @@ const QuestionCard = ({ topic, question, onAnswer, feedback, hideExpl }: Questio
 };
 
 /* ------------------------------------------------------------------ */
+/* Tutorialele de calcul în coloană                                     */
+/* ------------------------------------------------------------------ */
+
+const TutRowView = ({ row }: { row: TutRow }) => (
+  <div className={`tut-row${row.small ? " sm" : ""}`}>
+    <span className="tut-sign">{row.sign ?? ""}</span>
+    {row.cells.map((c, i) => (
+      <span
+        key={i}
+        className={
+          `tut-cell${c?.kind ? ` ${c.kind}` : ""}` +
+          (row.line && i >= row.line[0] && i <= row.line[1] ? " line" : "")
+        }
+      >
+        {c ? c.ch : ""}
+      </span>
+    ))}
+  </div>
+);
+
+/** Tabla de calcul a unui pas: coloane pentru +, −, × și bară pentru împărțire. */
+const TutBoard = ({ tut, step }: { tut: Tutorial; step: TutStep }) => {
+  const board = <div className="tut-board">{step.rows.map((r, i) => <TutRowView key={i} row={r} />)}</div>;
+  if (tut.kind !== "div") return <div className="tut-wrap">{board}</div>;
+  return (
+    <div className="tut-wrap">
+      <div className="tut-div">
+        {board}
+        <div className="tut-bar" />
+        <div className="tut-quot">
+          <div className="dv">{tut.divisor}</div>
+          <div className="tut-qline" />
+          <div className="dv q">{step.quot || " "}</div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/** Prompt pentru Claude: explică procedeul, pe alt exemplu. */
+const buildTutorialPrompt = (nume: string, t: Tutorial): string => [
+  "Ești un profesor de matematică prietenos și răbdător. Un elev de clasa a IV-a, care se pregătește pentru testul de admitere/departajare la Colegiul Național „Gheorghe Lazăr” din Sibiu, învață acum acest procedeu de calcul.",
+  "",
+  `Procedeul: ${nume} — ${t.titlu}.`,
+  `Exemplul din caiet: ${t.intro.replace("Exemplul nostru: ", "")}`,
+  "",
+  "Explică-i, pe înțelesul unui copil, în limba română:",
+  "1. Cum se așază numerele pe hârtie și de ce contează alinierea cifrelor.",
+  "2. Pașii, unul câte unul, pe un alt exemplu asemănător, cu numere de 3–4 cifre.",
+  "3. Greșelile pe care le fac de obicei copiii la acest procedeu și cum se evită.",
+  "4. Un truc simplu de verificare a rezultatului.",
+].join("\n");
+
+interface TutorialViewProps {
+  op: ColumnOp;
+  onExit: () => void;
+  onPractice: () => void;
+}
+
+const TutorialView = ({ op, onExit, onPractice }: TutorialViewProps) => {
+  const [tut, setTut] = useState<Tutorial>(() => op.tutorial());
+  const [i, setI] = useState(0);
+  const step = tut.steps[i];
+  const last = i === tut.steps.length - 1;
+
+  return (
+    <>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+        <button className="btn ghost" style={{ fontSize: 14, padding: "6px 14px" }} onClick={onExit}>
+          ← Înapoi
+        </button>
+        <button
+          className="btn ghost"
+          style={{ fontSize: 14, padding: "6px 14px" }}
+          onClick={() => { setTut(op.tutorial()); setI(0); }}
+        >
+          🎲 Alt exemplu
+        </button>
+      </div>
+
+      <h1 style={{ fontSize: 25, margin: "0 0 2px", fontWeight: 800 }}>{op.icon} {tut.titlu}</h1>
+      <p className="hand" style={{ fontSize: 20, color: "var(--ink-soft)", margin: "0 0 12px", transform: "rotate(-1deg)" }}>
+        {tut.intro}
+      </p>
+
+      <div className="card">
+        <TutBoard tut={tut} step={step} />
+
+        <div className="tut-step">
+          <span className="tut-no">Pasul {i + 1} din {tut.steps.length}</span>
+          <p style={{ margin: "4px 0 0", fontSize: 15.5, lineHeight: 1.5 }} aria-live="polite">{step.text}</p>
+        </div>
+
+        <div className="tut-progress"><div style={{ width: `${((i + 1) / tut.steps.length) * 100}%` }} /></div>
+
+        <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+          <button
+            className="btn ghost"
+            style={{ fontSize: 15, padding: "9px 18px" }}
+            onClick={() => setI((n) => Math.max(0, n - 1))}
+            disabled={i === 0}
+          >
+            ← Pasul anterior
+          </button>
+          {last ? (
+            <button className="btn" style={{ fontSize: 15, padding: "9px 18px" }} onClick={onPractice}>
+              ✏️ Hai să exersez!
+            </button>
+          ) : (
+            <button className="btn" style={{ fontSize: 15, padding: "9px 18px" }} onClick={() => setI((n) => n + 1)}>
+              Pasul următor →
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 14, background: "#FFFDF6" }}>
+        <div className="display" style={{ fontWeight: 800, fontSize: 15, marginBottom: 8 }}>📌 De reținut</div>
+        <ul className="tut-rules">
+          {tut.reguli.map((r, k) => <li key={k}>{r}</li>)}
+        </ul>
+        <ExplainButtons prompt={buildTutorialPrompt(op.name, tut)} />
+      </div>
+    </>
+  );
+};
+
+/* ------------------------------------------------------------------ */
 /* Aplicația                                                           */
 /* ------------------------------------------------------------------ */
 
-type Screen = "home" | "practice" | "quick" | "quickResult" | "varianta" | "variantaResult" | "stats" | "joc";
+type Screen = "home" | "practice" | "quick" | "quickResult" | "varianta" | "variantaResult" | "stats" | "joc" | "calcul" | "tutorial";
 
 const QUICK_QUESTIONS = 9;
 const QUICK_SECONDS = 20 * 60;
@@ -2441,10 +3095,15 @@ export default function MatePentruLazar() {
 
   // antrenament
   const [topic, setTopic] = useState<Topic | null>(null);
+  /** Ecranul la care ne întoarcem din antrenament (acasă sau calculul în coloană). */
+  const [practiceBack, setPracticeBack] = useState<Screen>("home");
   const [question, setQuestion] = useState<Question | null>(null);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [streak, setStreak] = useState(0);
   const [session, setSession] = useState<{ ok: number; total: number }>({ ok: 0, total: 0 });
+
+  // calcul în coloană
+  const [colOp, setColOp] = useState<ColumnOp | null>(null);
 
   // simulare rapidă
   const [quickQs, setQuickQs] = useState<{ topic: Topic; q: Question }[]>([]);
@@ -2545,7 +3204,8 @@ export default function MatePentruLazar() {
 
   /* ---------------- antrenament ---------------- */
 
-  const startPractice = (t: Topic) => {
+  const startPractice = (t: Topic, back: Screen = "home") => {
+    setPracticeBack(back);
     setTopic(t);
     setQuestion(t.gen(level));
     setFeedback(null);
@@ -2568,6 +3228,13 @@ export default function MatePentruLazar() {
     if (!topic) return;
     setQuestion(topic.gen(level));
     setFeedback(null);
+  };
+
+  /* ---------------- calcul în coloană ---------------- */
+
+  const openTutorial = (op: ColumnOp) => {
+    setColOp(op);
+    setScreen("tutorial");
   };
 
   /* ---------------- simulare rapidă ---------------- */
@@ -2742,7 +3409,7 @@ export default function MatePentruLazar() {
   const buildStatsPrompt = (): string => buildClaudePrompt({
     total: totals.total, ok: totals.ok, accuracy, stars: progress.stars,
     bestNota, activeDays, streak: dayStreak, examCount: progress.examHistory.length,
-    perTopic: TOPICS.map((t) => ({
+    perTopic: [...TOPICS, ...COLUMN_OPS].map((t) => ({
       name: t.name,
       ok: progress.perTopic[t.id]?.ok ?? 0,
       total: progress.perTopic[t.id]?.total ?? 0,
@@ -2909,6 +3576,18 @@ export default function MatePentruLazar() {
 
             <button
               className="btn ghost"
+              style={{ width: "100%", fontSize: 16, padding: "12px 22px", marginBottom: 6 }}
+              onClick={() => setScreen("calcul")}
+            >
+              🧾 Calcul în coloană — cele patru operații
+            </button>
+            <p style={{ fontSize: 13, color: "var(--ink-soft)", margin: "0 0 14px", textAlign: "center" }}>
+              Adunare, scădere, înmulțire și împărțire cu numere de 3 și 4 cifre, cu tutoriale pas cu pas:
+              cum se așază cifrele, cum se ține minte, cum se împrumută și cum se împarte cu bară.
+            </p>
+
+            <button
+              className="btn ghost"
               style={{ width: "100%", fontSize: 16, padding: "12px 22px", marginBottom: 18 }}
               onClick={() => { setSelDay(null); setCalYear(now.getUTCFullYear()); setCalMonth(now.getUTCMonth()); setScreen("stats"); }}
             >
@@ -2993,10 +3672,21 @@ export default function MatePentruLazar() {
         {/* -------------------------- ANTRENAMENT -------------------------- */}
         {screen === "practice" && topic && question && (
           <>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-              <button className="btn ghost" style={{ fontSize: 14, padding: "6px 14px" }} onClick={() => setScreen("home")}>
-                ← Înapoi
-              </button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button className="btn ghost" style={{ fontSize: 14, padding: "6px 14px" }} onClick={() => setScreen(practiceBack)}>
+                  ← Înapoi
+                </button>
+                {columnOpOf(topic.id) && (
+                  <button
+                    className="pill"
+                    style={{ fontSize: 13 }}
+                    onClick={() => openTutorial(columnOpOf(topic.id)!)}
+                  >
+                    📖 Cum se face
+                  </button>
+                )}
+              </div>
               <div style={{ display: "flex", gap: 14, alignItems: "center" }}>
                 {streak >= 3 && (
                   <span className="hand" style={{ fontSize: 19, color: "var(--red-pen)" }}>🔥 {streak} la rând!</span>
@@ -3219,6 +3909,88 @@ export default function MatePentruLazar() {
         )}
 
         {/* ----------------------------- STATISTICI ----------------------------- */}
+        {/* ----------------------- CALCUL ÎN COLOANĂ ----------------------- */}
+        {screen === "calcul" && (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <button className="btn ghost" style={{ fontSize: 14, padding: "6px 14px" }} onClick={() => setScreen("home")}>
+                ← Înapoi
+              </button>
+              <span className="display" style={{ fontWeight: 700, fontSize: 14.5, color: "var(--ink-soft)" }}>
+                {LEVELS.find((lv) => lv.v === level)?.name}
+              </span>
+            </div>
+
+            <h1 style={{ fontSize: 26, margin: "0 0 4px", fontWeight: 800 }}>🧾 Calcul în coloană</h1>
+            <p className="hand" style={{ fontSize: 20, color: "var(--ink-soft)", margin: "0 0 12px", transform: "rotate(-1deg)" }}>
+              cele patru operații, pas cu pas ✏️
+            </p>
+            <p style={{ fontSize: 13.5, color: "var(--ink-soft)", margin: "0 0 16px" }}>
+              Numere de 3 și 4 cifre. Alege o operație: citește întâi tutorialul, apoi exersează.
+              Fiecare tutorial pornește de la alt exemplu, iar exercițiile urmează nivelul ales acasă.
+            </p>
+
+            <div style={{ marginBottom: 16 }}>
+              <Mascot
+                small
+                message="Nu te grăbi: scrii cifrele una sub alta, apoi mergi de la dreapta la stânga. 🦉"
+              />
+            </div>
+
+            {COLUMN_OPS.map((op) => {
+              const st = progress.perTopic[op.id];
+              const { state, pct } = masteryOf(st);
+              return (
+                <div key={op.id} className="card op-card">
+                  <div className="op-head">
+                    <span className="op-ic">{op.icon}</span>
+                    <span style={{ flex: 1, minWidth: 0 }}>
+                      <span className="display" style={{ display: "block", fontWeight: 800, fontSize: 17 }}>{op.name}</span>
+                      <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>{op.sub}</span>
+                    </span>
+                    <span
+                      className="hand"
+                      style={{ fontSize: 16, whiteSpace: "nowrap", color: state === "stapanit" ? "var(--green-pen)" : "var(--ink-soft)" }}
+                    >
+                      {state === "stapanit" ? "stăpânit! ⭐" : state === "lucru" ? `${st!.ok}/${MASTERY_OK} corecte` : "nou"}
+                    </span>
+                  </div>
+                  <span className="bar" style={{ display: "block", margin: "10px 0 12px" }}>
+                    <div style={{ width: `${pct}%` }} />
+                  </span>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button className="btn" style={{ fontSize: 14, padding: "9px 16px" }} onClick={() => openTutorial(op)}>
+                      📖 Tutorial
+                    </button>
+                    <button
+                      className="btn ghost"
+                      style={{ fontSize: 14, padding: "9px 16px" }}
+                      onClick={() => startPractice(op, "calcul")}
+                    >
+                      ✏️ Exersează
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+
+            <div className="expl-box" style={{ marginTop: 4 }}>
+              💡 Ordinea bună de învățare: adunare → scădere → înmulțire → împărțire. La fiecare
+              operație, tutorialul îți arată exact ce se scrie și unde.
+            </div>
+          </>
+        )}
+
+        {/* ----------------------- TUTORIAL PAS CU PAS ---------------------- */}
+        {screen === "tutorial" && colOp && (
+          <TutorialView
+            key={colOp.id}
+            op={colOp}
+            onExit={() => setScreen("calcul")}
+            onPractice={() => startPractice(colOp, "calcul")}
+          />
+        )}
+
         {screen === "stats" && (
           <>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
